@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 数据缓存与输出
+cache/
+output/
+*.tif
+*.gpkg
+*.inp
+*.rpt
+*.out
+
+# 官方原始 PDF 较大不入库（来源链接见 data/rainfall/*.yaml）
+docs/sources/*.pdf
+
+# IDE / 系统
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store

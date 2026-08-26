@@ -34,7 +34,7 @@ def build_grid_inp(
     ny: int,
     hyetograph: list[tuple[float, float]],
     inp_path: Path,
-    imperv: float = 50.0,
+    imperv: float | np.ndarray = 50.0,  # 常数或 ny×nx 逐格不透水率(%)
     base_diameter_m: float = 1.0,
     lat_center: float = 22.5,
 ) -> dict:
@@ -88,9 +88,10 @@ def build_grid_inp(
     L += ["[RAINGAGES]", "RG1 INTENSITY 0:05 1.0 TIMESERIES storm", ""]
 
     L += ["[SUBCATCHMENTS]", ";;名称 雨量计 出口 面积(ha) 不透水% 宽度(m) 坡度% 路缘长"]
+    imp = np.broadcast_to(np.asarray(imperv, dtype=float), (ny, nx))
     for i in range(ny):
         for j in range(nx):
-            L.append(f"S{i}_{j} RG1 {jid(i, j)} {area_ha:.2f} {imperv} {width_m:.0f} {cslope[i, j]:.2f} 0")
+            L.append(f"S{i}_{j} RG1 {jid(i, j)} {area_ha:.2f} {imp[i, j]:.1f} {width_m:.0f} {cslope[i, j]:.2f} 0")
     L.append("")
     L += ["[SUBAREAS]", ";;名称 N不透 N透 蓄水不透 蓄水透 零积水% 汇流路径"]
     for i in range(ny):

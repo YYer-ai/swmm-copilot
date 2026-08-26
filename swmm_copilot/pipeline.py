@@ -31,11 +31,19 @@ def load_aois() -> dict:
     return yaml.safe_load((ROOT / "data" / "aoi.yaml").read_text(encoding="utf-8"))["aois"]
 
 
+def _downsample(a: np.ndarray, step: int) -> list:
+    """DEM 块平均降采样为二维列表（供前端可视化，控制体积）。"""
+    h, w = a.shape
+    rs = [(g[0], g[-1] + 1) for g in np.array_split(np.arange(h), max(1, h // step))]
+    cs = [(g[0], g[-1] + 1) for g in np.array_split(np.arange(w), max(1, w // step))]
+    return [[round(float(a[r0:r1, c0:c1].mean()), 1) for c0, c1 in cs] for r0, r1 in rs]
+
+
 def assess(aoi_name: str, p: int = 50, offline: bool = False, grid: int = 8) -> dict:
-    """执行一次内涝快速评估，返回结构化摘要（供 CLI/Agent/报告复用）。"""
+    """执行一次内涝快速评估，返回结构化摘要与可视化数据（供 CLI/Agent/Web 复用）。"""
     aoi = load_aois()[aoi_name]
     bbox = tuple(aoi["bbox"])
-    out_dir = ROOT / "output" / aoi["slug"]  # SWMM 引擎要求 ASCII 路径
+    out_dir = ROOT / "output" / aoi["slug"] / f"P{p}"  # 按重现期分离，避免相互覆盖
     out_dir.mkdir(parents=True, exist_ok=True)
 
     elev, transform, _ = fetch_dem(bbox, offline=offline)
@@ -64,6 +72,18 @@ def assess(aoi_name: str, p: int = 50, offline: bool = False, grid: int = 8) -> 
 
     _plot(aoi_name, bbox, p, filled, info, rows, out_dir)
 
+    cx, cy = info["cx"], info["cy"]
+    viz = {
+        "bbox": list(bbox),
+        "dem": _downsample(filled, 3),
+        "links": [[float(cx[i, j]), float(cy[i, j]), float(cx[d]), float(cy[d])]
+                  for (i, j), d in info["down"].items() if d is not None],
+        "outfalls": [[float(cx[q]), float(cy[q])] for q in info["outfalls"]],
+        "nodes": [{"x": float(cx[i, j]), "y": float(cy[i, j]), "name": f"J{i}_{j}",
+                   "depth": round(d)} for i, j, _, d in rows],
+        "max_depth": round(rows[0][3], 0) if rows else 0,
+        "slug": aoi["slug"], "p": p,
+    }
     return {
         "aoi": aoi_name, "city": aoi["city"], "formula_zone": aoi["zone"],
         "return_period_yr": p, "rain_total_mm": round(rain_total, 1),
@@ -72,6 +92,7 @@ def assess(aoi_name: str, p: int = 50, offline: bool = False, grid: int = 8) -> 
         "max_depth_mm": round(rows[0][3], 0) if rows else 0.0,
         "top5": [{"node": f"J{i}_{j}", "depth_mm": round(d, 0)} for i, j, _, d in rows[:5]],
         "map": str(out_dir / "flood_map.png"), "inp": str(out_dir / "model.inp"),
+        "viz": viz,
         "note": "快速评估级：管网为概化生成（隐含约3年一遇设计标准），积水深为节点溢流折算",
     }
 

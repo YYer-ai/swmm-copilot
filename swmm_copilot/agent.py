@@ -39,14 +39,22 @@ _TOOLS = [
             "required": ["aoi"]}}},
 ]
 
+def _run_assessment(aoi: str, P: int = 50) -> dict:
+    result = assess(aoi, p=int(P), offline=True)
+    Agent.last_result = result  # 供 Web 层取可视化数据（单用户本地工具）
+    return result
+
+
 _REGISTRY = {
     "list_aois": lambda **kw: [{"aoi": k, "city": v["city"], "formula_zone": v["zone"]}
                                for k, v in load_aois().items()],
-    "run_assessment": lambda aoi, P=50: assess(aoi, p=int(P), offline=True),
+    "run_assessment": _run_assessment,
 }
 
 
 class Agent:
+    last_result: dict | None = None  # 最近一次评估结果（含 viz 可视化数据）
+
     def __init__(self, base_url: str | None = None, api_key: str | None = None,
                  model: str | None = None, timeout: int = 300):
         self.base_url = (base_url or os.environ.get("SWMM_COPILOT_BASE_URL", "")).rstrip("/")

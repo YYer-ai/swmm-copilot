@@ -122,7 +122,21 @@ def chat(ci: ChatIn):
     except RuntimeError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
     try:
+        agent = Agent(base_url=cfg.get(_K["base"]), api_key=cfg.get(_K["key"]),
+                      model=cfg.get(_K["model"]))
+        Agent.last_result = None
         reply = agent.ask(ci.message, ci.history)
-        return {"ok": True, "reply": reply}
+        return {"ok": True, "reply": reply, "result": Agent.last_result}
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=500)
+
+
+@app.get("/api/artifact")
+def artifact(aoi: str, p: int, name: str = "flood_map.png"):
+    """评估产物文件服务（限 output/ 下白名单文件，防路径穿越）。"""
+    if name not in ("flood_map.png", "model.inp") or "/" in aoi or ".." in aoi:
+        return JSONResponse({"ok": False, "error": "非法请求"}, status_code=400)
+    f = ROOT / "output" / aoi / f"P{p}" / name
+    if not f.exists():
+        return JSONResponse({"ok": False, "error": "文件不存在"}, status_code=404)
+    return FileResponse(f)

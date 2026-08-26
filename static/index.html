@@ -43,6 +43,14 @@
   .chatrow input { flex:1; }
   .dotting::after { content:"…"; animation:dots 1.2s steps(4,end) infinite; }
   @keyframes dots { 0%{content:""} 25%{content:"·"} 50%{content:"··"} 75%{content:"···"} }
+  .viz { align-self:stretch; background:#fff; border:1px solid var(--line); border-radius:12px; padding:12px; }
+  .viz canvas { width:100%; border-radius:8px; display:block; cursor:crosshair; }
+  .viz .legend { display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-top:8px; font-size:12px; color:var(--muted); }
+  .viz .legend .sw { display:inline-block; width:14px; height:10px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+  .viz .bar { width:120px; height:8px; border-radius:4px; }
+  .viz .tip { position:fixed; z-index:9; background:#111827ee; color:#fff; font-size:12px; padding:4px 8px; border-radius:6px; pointer-events:none; display:none; }
+  .viz .files { margin-top:8px; font-size:12px; }
+  .viz .files a { color:var(--blue); text-decoration:none; margin-right:14px; }
 </style>
 </head>
 <body>
@@ -153,6 +161,70 @@ $("btn-save").onclick = async () => {
   st.className = "status " + (r.ok ? "ok" : "err"); st.textContent = r.ok ? "配置已保存到本地 .env（密钥不入仓库）" : r.error;
 };
 
+// ---- 评估结果可视化：Canvas 交互地图（地形色带 + 管网 + 排放口 + 积水气泡）----
+function demColor(t){  // 简化 terrain 色带
+  const stops = [[0,[51,102,204]],[0.25,[126,200,120]],[0.55,[222,220,110]],[0.8,[200,150,80]],[1,[140,90,60]]];
+  for (let i = 1; i < stops.length; i++) if (t <= stops[i][0]) {
+    const [t0,c0] = stops[i-1], [t1,c1] = stops[i], k = (t-t0)/(t1-t0);
+    return `rgb(${c0.map((v,j)=>Math.round(v+(c1[j]-v)*k)).join(",")})`;
+  }
+  return "rgb(140,90,60)";
+}
+function renderViz(viz){
+  const box = document.createElement("div"); box.className = "viz";
+  const cv = document.createElement("canvas"); box.appendChild(cv);
+  const [w,s,e,n] = viz.bbox;
+  const W = Math.min(920, $("msgs").clientWidth - 8);
+  cv.width = W * 2; cv.height = W * (n-s)/(e-w) * 2; cv.style.height = Math.round(W*(n-s)/(e-w)) + "px";
+  const ctx = cv.getContext("2d"); ctx.scale(2,2);
+  const X = lon => (lon - w) / (e - w) * W, Y = lat => (n - lat) / (n - s) * W * (n-s)/(e-w);
+  // 地形
+  const dem = viz.dem, vals = dem.flat(), lo = Math.min(...vals), hi = Math.max(...vals) || 1;
+  const cw = W / dem[0].length, ch = (W*(n-s)/(e-w)) / dem.length;
+  dem.forEach((row, r) => row.forEach((v, c) => {
+    ctx.fillStyle = demColor((v - lo) / (hi - lo || 1));
+    ctx.fillRect(c*cw, r*ch, cw+1, ch+1);
+  }));
+  // 管网与排放口
+  ctx.strokeStyle = "rgba(37,99,235,.75)"; ctx.lineWidth = 1;
+  viz.links.forEach(([x1,y1,x2,y2]) => { ctx.beginPath(); ctx.moveTo(X(x1),Y(y1)); ctx.lineTo(X(x2),Y(y2)); ctx.stroke(); });
+  ctx.fillStyle = "#16a34a";
+  viz.outfalls.forEach(([x,y]) => { const px=X(x), py=Y(y); ctx.beginPath(); ctx.moveTo(px,py-6); ctx.lineTo(px+6,py+5); ctx.lineTo(px-6,py+5); ctx.fill(); });
+  // 节点与积水气泡
+  viz.nodes.forEach(nd => {
+    const px = X(nd.x), py = Y(nd.y);
+    ctx.fillStyle = "#374151"; ctx.beginPath(); ctx.arc(px, py, 1.6, 0, 7); ctx.fill();
+    if (nd.depth > 0) {
+      const r = 3 + nd.depth / (viz.max_depth || 1) * 9;
+      ctx.fillStyle = `rgba(220,38,38,${0.45 + 0.5*nd.depth/(viz.max_depth||1)})`;
+      ctx.beginPath(); ctx.arc(px, py, r, 0, 7); ctx.fill();
+    }
+  });
+  // 图例与文件
+  const lg = document.createElement("div"); lg.className = "legend";
+  lg.innerHTML = `<span><span class="sw" style="background:rgba(220,38,38,.8)"></span>积水点（悬停看深度，最大 ${viz.max_depth}mm）</span>
+    <span><span class="sw" style="background:#2563eb"></span>概化管网</span>
+    <span><span class="sw" style="background:#16a34a"></span>排放口</span>
+    <span><span class="sw bar" style="background:linear-gradient(90deg,#fca5a5,#dc2626)"></span>积水加深</span>`;
+  box.appendChild(lg);
+  const fl = document.createElement("div"); fl.className = "files";
+  fl.innerHTML = `<a href="/api/artifact?aoi=${viz.slug}&p=${viz.p}&name=flood_map.png" target="_blank">下载原图（含双图）</a>
+    <a href="/api/artifact?aoi=${viz.slug}&p=${viz.p}&name=model.inp" target="_blank">下载 SWMM 模型</a>`;
+  box.appendChild(fl);
+  // 悬停提示
+  const tip = document.createElement("div"); tip.className = "tip"; box.appendChild(tip);
+  cv.onmousemove = ev => {
+    const rc = cv.getBoundingClientRect(), mx = (ev.clientX - rc.left) * (W / rc.width), my = (ev.clientY - rc.top) * (W / rc.width);
+    let best = null, bd = 14;
+    viz.nodes.forEach(nd => { const d = Math.hypot(X(nd.x) - mx, Y(nd.y) - my); if (d < bd) { bd = d; best = nd; } });
+    if (best) { tip.style.display = "block"; tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY - 10 + "px";
+      tip.textContent = `${best.name}｜积水 ${best.depth} mm`; }
+    else tip.style.display = "none";
+  };
+  cv.onmouseleave = () => tip.style.display = "none";
+  $("msgs").appendChild(box); $("msgs").scrollTop = 1e9;
+}
+
 async function send(){
   const text = $("input").value.trim();
   if (!text) return;
@@ -164,7 +236,8 @@ async function send(){
     const r = await fetch("/api/chat", { method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ message: text, history }) }).then(r=>r.json());
     loading.remove();
-    if (r.ok) { addMsg(r.reply, "bot"); history.push({role:"user",content:text},{role:"assistant",content:r.reply}); }
+    if (r.ok) { addMsg(r.reply, "bot"); if (r.result && r.result.viz) renderViz(r.result.viz);
+      history.push({role:"user",content:text},{role:"assistant",content:r.reply}); }
     else addMsg("出错：" + r.error, "hint");
   } catch (e) { loading.remove(); addMsg("请求失败：" + e, "hint"); }
   $("btn-send").disabled = false; $("input").focus();

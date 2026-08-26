@@ -22,3 +22,7 @@ docs/sources/*.pdf
 .vscode/
 Thumbs.db
 .DS_Store
+
+# 密钥与本地环境
+.env
+*.env

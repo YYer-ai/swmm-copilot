@@ -4,23 +4,47 @@
 
 > 定位为**快速评估**（规划级/初筛级），非工程级详细设计。
 
-## 当前状态（v0.1 预览）
+## 当前状态（v0.2）
 
 - ✅ **暴雨强度公式库**：5 城市 49 片区（广州 6 区、深圳 4 流域、重庆 38 区县、北京/南宁/海口经典版），全部标注官方来源，与官方公布雨量表交叉验证（复算误差 < 0.5%）
 - ✅ **设计暴雨生成**：任意重现期（1~100 年）暴雨强度求值 + 芝加哥雨型（总量守恒）
-- ✅ **M1 最小链路**（`examples/demo_pipeline.py`）：bbox → DEM（Copernicus GLO-30，首次在线缓存、之后**完全离线**）→ 填洼/D8/汇流累积 → 网格概化 SWMM 建模（多排放口、管径按汇流量 3/8 次幂、井底埋深递推）→ pyswmm 模拟 → 节点溢流折算积水深 → matplotlib 本地渲染风险图。除公式库外无在线依赖，`--offline` 强制离线
-- 🚧 M1 完整版：ESA WorldCover 自动不透水率、OSM 建筑密度修正、行政区名圈定
-- 🚧 M3 LLM Agent 化 / M4 中文评估报告（规划中，见路线图）
+- ✅ **评估链路**（`python examples/demo_pipeline.py [--aoi 片区] [--p 重现期] [--offline]`）：片区 → DEM+土地覆盖（COG 窗口缓存，首次在线秒级、之后**完全离线**）→ 填洼/D8/汇流累积 → WorldCover 逐格不透水率 → 网格概化 SWMM（多排放口、管径按汇流量 3/8 次幂、井底埋深递推）→ 积水深折算 + matplotlib 风险图
+- ✅ **M3 LLM Agent**（`python examples/agent_cli.py`）：自然语言对话驱动，OpenAI 兼容接口 + tools 函数调用，密钥经环境变量注入
+- 🚧 M4：中文评估报告文档化输出；OSM 建筑密度修正；公式库/片区库扩充
 
 > 模型为**快速评估级**（规划/初筛），管网为概化生成（非真实管网数据），积水深为节点溢流折算（非二维漫流），正式工程请以实测与详细设计为准。
 
 ## 快速开始
 
 ```powershell
-python -m pip install pyyaml
-python tests/test_design_storm.py      # 自检（含官方雨量表交叉验证）
+python -m pip install pyyaml numpy matplotlib rasterio pyswmm
+python tests/test_design_storm.py      # 公式自检（含官方雨量表交叉验证）
 python examples/demo_storm.py          # 生成设计暴雨雨型
+python examples/demo_pipeline.py       # 全链路评估（深圳福田 50 年一遇）
 ```
+
+## LLM Agent（自然语言评估）
+
+任意 OpenAI 兼容接口（支持 tools 函数调用）均可接入，密钥经环境变量注入（不入仓库）：
+
+```powershell
+$env:SWMM_COPILOT_BASE_URL = "http://<你的服务>/v1"
+$env:SWMM_COPILOT_API_KEY  = "<你的密钥>"
+$env:SWMM_COPILOT_MODEL    = "<模型名>"
+python examples/agent_cli.py
+```
+
+会话示例：
+
+```
+你> 帮我评估一下深圳福田50年一遇的内涝风险
+助手>（自动调用评估工具：总雨量 145.9mm、溢流 61/64 节点、最深积水点 Top5、
+      风险图路径，并附规划级评估说明）
+你> 换成广州天河，20年一遇
+助手>（自动切换片区与重现期重新评估）
+```
+
+除 LLM API 外全流程离线可用。
 
 代码调用：
 
@@ -50,15 +74,15 @@ hy = chicago_hyetograph(zone, P=50, duration=120, dt=5, r=0.4)  # 芝加哥雨�
 
 ## 路线图
 
-- [x] M1 数据管道（最小版）：bbox → DEM（Copernicus GLO-30）缓存离线；填洼/D8/汇流累积
-- [ ] M1 完整版：土地覆盖（ESA WorldCover）自动不透水率 + OSM 建筑 + 行政区圈定
-- [x] M2 模拟编排（最小版）：网格概化 → `.inp` → pyswmm → 积水深折算 + matplotlib 风险图
-- [ ] M3 LLM Agent 化：自然语言交互、工具编排、多轮追问
-- [ ] M4 输出：GeoTIFF 风险图 + 在线底图交互图 + 中文评估报告
+- [x] M1 数据管道：DEM/土地覆盖 COG 窗口缓存（离线可用）；填洼/D8/汇流累积；WorldCover 不透水率
+- [x] M2 模拟编排：网格概化 → `.inp` → pyswmm → 积水深折算 + 风险图
+- [x] M3 LLM Agent 化：自然语言交互、工具编排、多轮追问
+- [ ] M4 输出增强：中文评估报告（Word/Markdown）、GeoTIFF 风险栅格
+- [ ] 数据增强：OSM 建筑密度修正、行政区边界圈定、公式库/片区库扩充
 
 ## 依赖
 
-Python ≥ 3.10。当前模块仅依赖 `pyyaml`；GIS/模拟链路（M1/M2）将增加 rasterio、pysheds、pyswmm、swmmio。
+Python ≥ 3.10：`pyyaml numpy matplotlib rasterio pyswmm`（Agent 另需可访问的 OpenAI 兼容接口）。
 
 ## 许可
 

@@ -23,7 +23,18 @@ python examples/demo_storm.py          # 生成设计暴雨雨型
 python examples/demo_pipeline.py       # 全链路评估（深圳福田 50 年一遇）
 ```
 
-## LLM Agent（自然语言评估）
+## Web 界面（含模型配置与测试连接）
+
+```powershell
+python -m pip install fastapi uvicorn
+python examples/webui.py     # 打开 http://127.0.0.1:8788
+```
+
+- **模型配置**：填写 Base URL / API Key / 模型名 → 「测试连接」即时返回延迟与可用模型列表 → 「保存配置」写入本地 `.env`（密钥不入仓库）
+- **评估对话**：点击片区标签或输入自然语言，自动执行评估并渲染中文解读（表格/列表）
+- 前端资源全部内联（无 CDN），除 LLM API 外离线可用
+
+## LLM Agent（命令行版）
 
 任意 OpenAI 兼容接口（支持 tools 函数调用）均可接入，密钥经环境变量注入（不入仓库）：
 

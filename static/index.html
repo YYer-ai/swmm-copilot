@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>swmm-copilot 内涝快评</title>
+<style>
+  :root { --blue:#2563eb; --green:#16a34a; --red:#dc2626; --bg:#f3f4f6; --card:#fff; --line:#e5e7eb; --text:#1f2937; --muted:#6b7280; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap { max-width:980px; margin:0 auto; padding:20px 16px 60px; }
+  header { display:flex; align-items:baseline; gap:10px; margin:6px 0 18px; }
+  header h1 { font-size:22px; }
+  header span { color:var(--muted); font-size:13px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin-bottom:18px; }
+  .card h2 { font-size:15px; margin-bottom:14px; color:var(--text); }
+  .grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+  @media (max-width:720px){ .grid{grid-template-columns:1fr;} }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  input { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  input:focus { outline:2px solid #bfdbfe; border-color:var(--blue); }
+  .btn { padding:8px 16px; border:none; border-radius:8px; font-size:14px; cursor:pointer; background:var(--blue); color:#fff; }
+  .btn:disabled { background:#93c5fd; cursor:not-allowed; }
+  .btn.ghost { background:#eef2ff; color:var(--blue); }
+  .row { display:flex; gap:10px; margin-top:14px; align-items:center; flex-wrap:wrap; }
+  .status { font-size:13px; padding:6px 12px; border-radius:8px; display:none; margin-top:12px; white-space:pre-wrap; }
+  .status.ok { display:block; background:#f0fdf4; color:var(--green); border:1px solid #bbf7d0; }
+  .status.err { display:block; background:#fef2f2; color:var(--red); border:1px solid #fecaca; }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .chip { font-size:12px; padding:4px 12px; border-radius:999px; background:#eef2ff; color:var(--blue); cursor:pointer; border:1px solid #c7d2fe; }
+  #msgs { max-height:52vh; overflow-y:auto; display:flex; flex-direction:column; gap:12px; padding:4px 2px; }
+  .msg { max-width:86%; padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.65; overflow-x:auto; }
+  .msg.user { align-self:flex-end; background:var(--blue); color:#fff; white-space:pre-wrap; }
+  .msg.bot { align-self:flex-start; background:#f9fafb; border:1px solid var(--line); }
+  .msg.bot table { border-collapse:collapse; margin:8px 0; font-size:13px; }
+  .msg.bot th,.msg.bot td { border:1px solid var(--line); padding:4px 10px; }
+  .msg.bot th { background:#f3f4f6; }
+  .msg.bot code { background:#eef2ff; padding:1px 5px; border-radius:4px; font-size:13px; }
+  .msg.bot h3 { font-size:14px; margin:10px 0 4px; }
+  .msg.bot ul,.msg.bot ol { padding-left:20px; margin:4px 0; }
+  .msg.hint { align-self:center; color:var(--muted); font-size:12px; background:none; border:none; }
+  .chatrow { display:flex; gap:10px; margin-top:14px; }
+  .chatrow input { flex:1; }
+  .dotting::after { content:"…"; animation:dots 1.2s steps(4,end) infinite; }
+  @keyframes dots { 0%{content:""} 25%{content:"·"} 50%{content:"··"} 75%{content:"···"} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>swmm-copilot 内涝快评</h1><span>自然语言驱动的城市内涝快速评估（规划级）</span></header>
+
+  <div class="card">
+    <h2>模型配置</h2>
+    <div class="grid">
+      <div><label>Base URL（OpenAI 兼容，含 /v1）</label><input id="base_url" placeholder="http://host:port/v1"></div>
+      <div><label>API Key</label><input id="api_key" type="password" placeholder="sk-…"></div>
+      <div><label>模型名</label><input id="model" placeholder="qwen3827b"></div>
+    </div>
+    <div class="row">
+      <button class="btn ghost" id="btn-test">测试连接</button>
+      <button class="btn" id="btn-save">保存配置</button>
+    </div>
+    <div class="status" id="test-status"></div>
+  </div>
+
+  <div class="card">
+    <h2>评估对话</h2>
+    <div class="chips" id="chips"></div>
+    <div id="msgs"><div class="msg hint">配置并测试通过模型连接后，点击上方片区或直接输入，例如「评估深圳福田50年一遇的内涝风险」</div></div>
+    <div class="chatrow">
+      <input id="input" placeholder="输入评估需求…（Enter 发送）">
+      <button class="btn" id="btn-send">发送</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const history = [];
+
+// 轻量 Markdown 渲染：标题/粗体/代码/表格/列表/换行（转义优先，防注入）
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function md(src){
+  const lines = esc(src).split("\n"); let html = "", inTable = false, inList = null;
+  const closeList = () => { if(inList){ html += `</${inList}>`; inList = null; } };
+  const closeTable = () => { if(inTable){ html += "</tbody></table>"; inTable = false; } };
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i].trim();
+    if (/^\|.*\|$/.test(l)) {
+      const cells = l.slice(1,-1).split("|").map(c => c.trim());
+      if (cells.every(c => /^-+$/.test(c))) continue;           // 分隔行
+      if (!inTable) { closeList(); html += "<table><thead><tr>" + cells.map(c=>`<th>${inline(c)}</th>`).join("") + "</tr></thead><tbody>"; inTable = true; continue; }
+      html += "<tr>" + cells.map(c=>`<td>${inline(c)}</td>`).join("") + "</tr>"; continue;
+    } else closeTable();
+    const m = l.match(/^(#{1,4})\s+(.*)/);
+    if (m) { closeList(); html += `<h3>${inline(m[2])}</h3>`; continue; }
+    const li = l.match(/^[-*]\s+(.*)/) || l.match(/^\d+\.\s+(.*)/);
+    if (li) {
+      const tag = /^\d+\./.test(l) ? "ol" : "ul";
+      if (inList !== tag) { closeList(); html += `<${tag}>`; inList = tag; }
+      html += `<li>${inline(li[1])}</li>`; continue;
+    }
+    closeList();
+    if (l === "") continue;
+    html += `<p>${inline(l)}</p>`;
+  }
+  closeList(); closeTable();
+  return html;
+  function inline(s){ return s.replace(/\*\*(.+?)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>"); }
+}
+
+function addMsg(text, who){
+  if (who === "hint"){ const d = document.createElement("div"); d.className = "msg hint"; d.textContent = text; $("msgs").appendChild(d); return d; }
+  const d = document.createElement("div");
+  d.className = "msg " + who;
+  if (who === "user") d.textContent = text; else d.innerHTML = md(text);
+  $("msgs").appendChild(d); $("msgs").scrollTop = 1e9;
+  return d;
+}
+
+// 初始化：载入配置与片区
+fetch("/api/config").then(r=>r.json()).then(c=>{
+  if (c.base_url) $("base_url").value = c.base_url;
+  if (c.api_key)  $("api_key").value  = c.api_key;
+  if (c.model)    $("model").value    = c.model;
+});
+fetch("/api/aois").then(r=>r.json()).then(list=>{
+  list.forEach(a=>{
+    const s = document.createElement("span");
+    s.className = "chip"; s.textContent = `${a.aoi}（${a.city}）`;
+    s.onclick = () => { $("input").value = `评估${a.aoi}50年一遇的内涝风险`; $("input").focus(); };
+    $("chips").appendChild(s);
+  });
+});
+
+function form(){ return { base_url: $("base_url").value.trim(), api_key: $("api_key").value.trim(), model: $("model").value.trim() }; }
+
+$("btn-test").onclick = async () => {
+  const st = $("test-status");
+  st.className = "status"; st.textContent = "";
+  $("btn-test").disabled = true; $("btn-test").textContent = "测试中…";
+  try {
+    const r = await fetch("/api/test", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(form()) }).then(r=>r.json());
+    if (r.ok) { st.className = "status ok"; st.textContent = `连接成功：${r.latency_ms} ms，可用模型 ${r.models.length} 个（${r.models.slice(0,5).join("、")}${r.models.length>5?" 等":""}）`; }
+    else { st.className = "status err"; st.textContent = r.error; }
+  } catch (e) { st.className = "status err"; st.textContent = "请求失败：" + e; }
+  $("btn-test").disabled = false; $("btn-test").textContent = "测试连接";
+};
+
+$("btn-save").onclick = async () => {
+  const st = $("test-status");
+  const r = await fetch("/api/config", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(form()) }).then(r=>r.json());
+  st.className = "status " + (r.ok ? "ok" : "err"); st.textContent = r.ok ? "配置已保存到本地 .env（密钥不入仓库）" : r.error;
+};
+
+async function send(){
+  const text = $("input").value.trim();
+  if (!text) return;
+  $("input").value = ""; $("btn-send").disabled = true;
+  addMsg(text, "user");
+  const loading = addMsg("评估运行中（SWMM 模拟 + 模型解读，约 1-2 分钟）", "hint");
+  loading.classList.add("dotting");
+  try {
+    const r = await fetch("/api/chat", { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ message: text, history }) }).then(r=>r.json());
+    loading.remove();
+    if (r.ok) { addMsg(r.reply, "bot"); history.push({role:"user",content:text},{role:"assistant",content:r.reply}); }
+    else addMsg("出错：" + r.error, "hint");
+  } catch (e) { loading.remove(); addMsg("请求失败：" + e, "hint"); }
+  $("btn-send").disabled = false; $("input").focus();
+}
+$("btn-send").onclick = send;
+$("input").addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+</script>
+</body>
+</html>

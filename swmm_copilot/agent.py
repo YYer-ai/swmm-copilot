@@ -40,7 +40,8 @@ _TOOLS = [
 ]
 
 def _run_assessment(aoi: str, P: int = 50) -> dict:
-    result = assess(aoi, p=int(P), offline=True)
+    # 默认「缓存优先、缺则在线拉取 COG 窗口」：任何片区首次运行自动下载数据
+    result = assess(aoi, p=int(P), offline=False)
     Agent.last_result = result  # 供 Web 层取可视化数据（单用户本地工具）
     return result
 

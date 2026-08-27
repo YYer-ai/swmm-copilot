@@ -47,8 +47,21 @@ def fetch_landcover(bbox: tuple[float, float, float, float], offline: bool = Fal
     with rasterio.open(f"/vsicurl/{url}") as src:
         win = from_bounds(*bbox, transform=src.transform).round_offsets().round_lengths()
         win = win.intersection(rasterio.windows.Window(0, 0, src.width, src.height))
-        arr = src.read(1, window=win)
-        transform = src.window_transform(win)
+        # 大范围（如全市）读 overview 层降采样（等效 ~30m，不透水率统计足够）
+        scale = 3 if (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) > 0.15 else 1
+        if scale > 1:
+            from rasterio.enums import Resampling
+
+            oh = max(1, round(win.height / scale))
+            ow = max(1, round(win.width / scale))
+            arr = src.read(1, window=win, out_shape=(oh, ow), resampling=Resampling.nearest)
+            from rasterio import Affine
+
+            transform = src.window_transform(win) * Affine.scale(
+                win.height / oh, win.width / ow)
+        else:
+            arr = src.read(1, window=win)
+            transform = src.window_transform(win)
         crs = src.crs
         profile = dict(driver="GTiff", dtype=arr.dtype, height=arr.shape[0], width=arr.shape[1],
                        count=1, crs=crs, transform=transform, compress="lzw")

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .agent import Agent
@@ -24,6 +25,7 @@ ENV_FILE = ROOT / ".env"
 STATIC = ROOT / "static" / "index.html"
 
 app = FastAPI(title="swmm-copilot 内涝快评")
+app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")  # vendor(three.js) 等本地资源
 
 _K = {"base": "SWMM_COPILOT_BASE_URL", "key": "SWMM_COPILOT_API_KEY", "model": "SWMM_COPILOT_MODEL"}
 

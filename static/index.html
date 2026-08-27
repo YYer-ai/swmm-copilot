@@ -5,12 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>swmm-copilot 内涝快评</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Cpath d='M16 5c4.5 5.4 8 9.6 8 13.5A8 8 0 1 1 8 18.5C8 14.6 11.5 10.4 16 5z' fill='%23fff'/%3E%3C/svg%3E">
+<script src="/static/vendor/three.min.js"></script>
+<script src="/static/vendor/OrbitControls.js"></script>
 <style>
   :root { --blue:#2563eb; --blue-d:#1d4ed8; --green:#16a34a; --red:#dc2626; --bg:#f1f5f9; --card:#fff; --line:#e2e8f0; --text:#1f2937; --muted:#6b7280;
           --shadow:0 1px 2px rgba(15,23,42,.05),0 8px 24px rgba(15,23,42,.06); }
   * { box-sizing:border-box; margin:0; }
   body { font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif; background:linear-gradient(180deg,#e5eefc 0%,var(--bg) 300px); color:var(--text); }
-  .wrap { max-width:980px; margin:0 auto; padding:22px 16px 60px; }
+  .wrap { max-width:1080px; margin:0 auto; padding:22px 16px 60px; }
   header { display:flex; align-items:center; gap:11px; margin:4px 0 20px; }
   header .logo { width:36px; height:36px; border-radius:10px; background:linear-gradient(135deg,#60a5fa,#1d4ed8); display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow); flex:none; }
   header .logo svg { width:20px; height:20px; }
@@ -25,7 +27,7 @@
   .grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
   @media (max-width:720px){ .grid{grid-template-columns:1fr;} }
   label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
-  input { width:100%; padding:8px 11px; border:1px solid var(--line); border-radius:9px; font-size:14px; transition:border-color .15s, box-shadow .15s; background:#fff; }
+  input[type=text], input[type=password] { width:100%; padding:8px 11px; border:1px solid var(--line); border-radius:9px; font-size:14px; transition:border-color .15s, box-shadow .15s; background:#fff; }
   input:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 3px #dbeafe; }
   .btn { padding:8px 18px; border:none; border-radius:9px; font-size:14px; cursor:pointer; background:linear-gradient(180deg,#3b82f6,var(--blue-d)); color:#fff; transition:filter .15s, transform .05s; }
   .btn:hover { filter:brightness(1.08); }
@@ -56,12 +58,21 @@
   .dotting::after { content:"…"; animation:dots 1.2s steps(4,end) infinite; }
   @keyframes dots { 0%{content:""} 25%{content:"·"} 50%{content:"··"} 75%{content:"···"} }
   .viz { align-self:stretch; background:#fff; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
-  .viz-head { padding:10px 14px; font-size:13px; font-weight:600; border-bottom:1px solid var(--line); background:#f8fafc;
-              display:flex; align-items:center; gap:8px; }
+  .viz-head { padding:10px 14px; font-size:13px; font-weight:600; border-bottom:1px solid var(--line); background:#f8fafc; display:flex; align-items:center; gap:8px; }
   .viz-head .badge { font-size:10.5px; font-weight:normal; color:#b45309; background:#fef3c7; border:1px solid #fde68a; padding:1px 8px; border-radius:999px; }
   .viz-body { display:flex; }
-  .map-wrap { flex:1.25; position:relative; min-width:0; border-right:1px solid var(--line); }
-  .map-wrap canvas { width:100%; display:block; cursor:crosshair; }
+  .map-wrap { flex:1.35; position:relative; min-width:0; border-right:1px solid var(--line); background:#e8edf3; }
+  .map-wrap canvas { width:100%; display:block; }
+  .map-wrap #cv2d { cursor:grab; touch-action:none; }
+  .map-wrap #cv2d.dragging { cursor:grabbing; }
+  .map-wrap #glcv { position:absolute; inset:0; height:100%; display:none; }
+  .map-tools { position:absolute; top:8px; left:8px; z-index:5; display:flex; gap:10px; align-items:center; flex-wrap:wrap;
+    background:rgba(255,255,255,.93); border:1px solid var(--line); border-radius:9px; padding:5px 10px; font-size:11px; color:#475569; box-shadow:var(--shadow); }
+  .map-tools .seg { display:flex; border:1px solid var(--line); border-radius:7px; overflow:hidden; }
+  .map-tools .seg button { border:none; background:#fff; padding:2px 10px; font-size:11px; cursor:pointer; color:var(--text); }
+  .map-tools .seg button.on { background:var(--blue); color:#fff; }
+  .map-tools input[type=range] { width:88px; accent-color:var(--blue); }
+  .map-hint { position:absolute; right:8px; bottom:8px; font-size:10.5px; color:#475569; background:rgba(255,255,255,.88); padding:2px 8px; border-radius:6px; pointer-events:none; }
   .viz-stats { flex:1; padding:14px 16px; min-width:236px; }
   .kpis { display:flex; gap:8px; }
   .kpi { flex:1; text-align:center; padding:10px 4px; background:#f8fafc; border-radius:9px; border:1px solid #eef2f7; }
@@ -96,15 +107,15 @@
     <div class="logo"><svg viewBox="0 0 32 32"><path d="M16 4c4.8 5.8 8.5 10.2 8.5 14.3a8.5 8.5 0 1 1-17 0C7.5 14.2 11.2 9.8 16 4z" fill="#fff"/><circle cx="13.4" cy="18.6" r="3" fill="#3b82f6"/></svg></div>
     <div class="tt"><h1>内涝快评 <span style="font-size:12px;color:#94a3b8;font-weight:normal">swmm-copilot</span></h1>
       <div class="sub">自然语言驱动的城市内涝快速评估 · 规划级</div></div>
-    <span class="ver">v6</span>
+    <span class="ver">v7</span>
   </header>
 
   <div class="card" id="cfg-card">
     <h2>模型配置</h2>
     <div class="grid">
-      <div><label>Base URL（OpenAI 兼容，含 /v1）</label><input id="base_url" placeholder="http://host:port/v1"></div>
+      <div><label>Base URL（OpenAI 兼容，含 /v1）</label><input id="base_url" type="text" placeholder="http://host:port/v1"></div>
       <div><label>API Key</label><input id="api_key" type="password" placeholder="sk-…"></div>
-      <div><label>模型名</label><input id="model" placeholder="qwen3827b"></div>
+      <div><label>模型名</label><input id="model" type="text" placeholder="qwen3827b"></div>
     </div>
     <div class="row">
       <button class="btn ghost" id="btn-test">测试连接</button>
@@ -118,7 +129,7 @@
     <div class="chips" id="chips"></div>
     <div id="msgs"></div>
     <div class="chatrow">
-      <input id="input" placeholder="输入评估需求…（Enter 发送）">
+      <input id="input" type="text" placeholder="输入评估需求…（Enter 发送）">
       <button class="btn" id="btn-send">发送</button>
     </div>
   </div>
@@ -127,13 +138,12 @@
 <script>
 const $ = id => document.getElementById(id);
 const history = [];
-let cfgReady = false;  // 模型是否已配置
+let cfgReady = false;
 window.addEventListener("error", e => {
   const bar = $("errbar"); document.body.prepend(bar); bar.style.display = "block";
   bar.textContent = "脚本错误：" + e.message + "（" + (e.filename || "").split("/").pop() + ":" + e.lineno + "）";
 });
 
-// 轻量 Markdown 渲染：标题/粗体/代码/表格/列表（转义优先，防注入）
 function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 function md(src){
   const lines = esc(src).split("\n"); let html = "", inTable = false, inList = null;
@@ -173,7 +183,6 @@ function addMsg(text, who){
   return d;
 }
 
-// 初始化：载入配置与片区；未配置时引导
 fetch("/api/config").then(r=>r.json()).then(c=>{
   if (c.base_url) { $("base_url").value = c.base_url; cfgReady = true; }
   if (c.api_key)  $("api_key").value  = c.api_key;
@@ -181,7 +190,7 @@ fetch("/api/config").then(r=>r.json()).then(c=>{
   if (!cfgReady) {
     $("cfg-card").classList.add("attention");
     addMsg("请先在上方「模型配置」填写 OpenAI 兼容接口信息，点「测试连接」通过后保存，即可开始评估", "hint");
-  } else addMsg("点击上方片区或直接输入，例如「评估深圳福田50年一遇的内涝风险」", "hint");
+  } else addMsg("点击上方片区或直接输入，例如「评估深圳全市50年一遇的内涝风险」", "hint");
 });
 fetch("/api/aois").then(r=>r.json()).then(list=>{
   list.forEach(a=>{
@@ -213,7 +222,7 @@ $("btn-save").onclick = async () => {
   if (r.ok) { cfgReady = true; $("cfg-card").classList.remove("attention"); }
 };
 
-// ---- 评估结果可视化 ----
+// ===================== 可视化 =====================
 function hillshade(dem){
   const h = dem.length, w = dem[0].length, out = [];
   for (let r = 0; r < h; r++) { out.push([]);
@@ -237,13 +246,24 @@ function floodColor(t, alpha){
   }
   return `rgba(23,37,84,${alpha})`;
 }
+
 function renderViz(res){
   const viz = res.viz, [w,s,e,n] = viz.bbox;
+  const ratio = (n - s) / (e - w);
+  const has3d = !!window.THREE;
   const box = document.createElement("div"); box.className = "viz";
   box.innerHTML = `
     <div class="viz-head">${res.aoi} · ${res.return_period_yr} 年一遇 · 内涝快速评估 <span class="badge">规划级</span></div>
     <div class="viz-body">
-      <div class="map-wrap"><canvas></canvas></div>
+      <div class="map-wrap">
+        <canvas id="cv2d"></canvas><canvas id="glcv"></canvas>
+        <div class="map-tools">
+          ${has3d ? `<div class="seg"><button id="m2d" class="on">2D</button><button id="m3d">3D 地形</button></div>` : ""}
+          <span>对比度</span><input type="range" id="gamma" min="40" max="260" value="100">
+          <button id="reset" style="border:none;background:none;color:#2563eb;font-size:11px;cursor:pointer;padding:0">复位</button>
+        </div>
+        <div class="map-hint">拖拽平移 · 滚轮缩放 · 悬停看深度</div>
+      </div>
       <div class="viz-stats">
         <div class="kpis">
           <div class="kpi"><b>${res.rain_total_mm}</b><span>设计总雨量 mm</span></div>
@@ -270,108 +290,199 @@ function renderViz(res){
     </div>`;
   $("msgs").appendChild(box);
 
-  const cv = box.querySelector("canvas"), mapWrap = box.querySelector(".map-wrap");
-  const ratio = (n - s) / (e - w);
+  const cv = box.querySelector("#cv2d"), glcv = box.querySelector("#glcv"), mapWrap = box.querySelector(".map-wrap");
   const wet = viz.nodes.filter(nd => nd.depth > 0);
-  let X, Y;
-  const tip = document.getElementById("viz-tip") || (() => {
-    const t = document.createElement("div"); t.id = "viz-tip"; document.body.appendChild(t); return t;
-  })();
+  const tip = $("viz-tip") || (() => { const t = document.createElement("div"); t.id = "viz-tip"; document.body.appendChild(t); return t; })();
 
-  const draw = () => {
-    const W = mapWrap.clientWidth || 560;
-    const H = Math.min(420, Math.round(innerHeight * 0.55), Math.round(W * ratio));
-    cv.width = W * 2; cv.height = H * 2; cv.style.height = H + "px";
-    const ctx = cv.getContext("2d"); ctx.setTransform(2, 0, 0, 2, 0, 0);
-    const curW = W, curH = H;
-    X = lon => (lon - w) / (e - w) * curW; Y = lat => (n - lat) / (n - s) * curH;
-    const sc = Math.max(0.55, Math.min(1, W / 560));
+  // ---- 全分辨率离屏图层（base 地形 / flood 积水 / top 道路地名），视口做 pan/zoom ----
+  const FW = 1600, FH = Math.max(300, Math.round(FW * ratio));
+  const mkLayer = () => { const c = document.createElement("canvas"); c.width = FW; c.height = FH; return c; };
+  const baseCv = mkLayer(), floodCv = mkLayer(), topCv = mkLayer();
+  const X = lon => (lon - w) / (e - w) * FW, Y = lat => (n - lat) / (n - s) * FH;
 
-    // 1 灰阶山体阴影
-    const hs = hillshade(viz.dem), dh = hs.length, dw = hs[0].length, cw = W / dw, ch = H / dh;
-    for (let r = 0; r < dh; r++) for (let c = 0; c < dw; c++) {
-      const g = Math.round(40 + 200 * hs[r][c]);
-      ctx.fillStyle = `rgb(${g},${g + 2},${g + 5})`;
-      ctx.fillRect(c * cw, r * ch, cw + 1, ch + 1);
-    }
-    // 2 连续积水（色差）
-    const fl = viz.flood || [], fm = viz.max_depth || 1;
+  // base：山体阴影 + 水系
+  let ctx = baseCv.getContext("2d");
+  const hs = hillshade(viz.dem), dh = hs.length, dw = hs[0].length, cw = FW / dw, ch2 = FH / dh;
+  for (let r = 0; r < dh; r++) for (let c = 0; c < dw; c++) {
+    const g = Math.round(40 + 200 * hs[r][c]);
+    ctx.fillStyle = `rgb(${g},${g + 2},${g + 5})`;
+    ctx.fillRect(c * cw, r * ch2, cw + 1, ch2 + 1);
+  }
+  const osm = viz.osm || {};
+  ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 2; ctx.globalAlpha = 0.9;
+  (osm.waterways || []).forEach(line => { ctx.beginPath(); line.forEach(([lo,la],i) => i ? ctx.lineTo(X(lo),Y(la)) : ctx.moveTo(X(lo),Y(la))); ctx.stroke(); });
+  ctx.globalAlpha = 1;
+
+  // flood：积水色差（gamma 可调重绘）
+  const fl = viz.flood || [], fm = viz.max_depth || 1;
+  let gamma = 1.0;
+  const drawFlood = () => {
+    const c2 = floodCv.getContext("2d");
+    c2.clearRect(0, 0, FW, FH);
     for (let r = 0; r < fl.length; r++) for (let c = 0; c < fl[r].length; c++) {
       const d = fl[r][c];
-      if (d > 0) { ctx.fillStyle = floodColor(Math.min(1, d / fm), 0.78);
-        ctx.fillRect(c * cw, r * ch, cw + 1, ch + 1); }
+      if (d > 0) { c2.fillStyle = floodColor(Math.min(1, Math.pow(d / fm, 1 / gamma)), 0.80);
+        c2.fillRect(c * cw, r * ch2, cw + 1, ch2 + 1); }
     }
-    // 3 水系与道路
-    const osm = viz.osm || {};
-    ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 1.8 * sc; ctx.globalAlpha = 0.9;
-    (osm.waterways || []).forEach(line => { ctx.beginPath(); line.forEach(([lo,la],i) => i ? ctx.lineTo(X(lo),Y(la)) : ctx.moveTo(X(lo),Y(la))); ctx.stroke(); });
-    ctx.globalAlpha = 0.55; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1;
-    (osm.roads || []).forEach(line => { ctx.beginPath(); line.forEach(([lo,la],i) => i ? ctx.lineTo(X(lo),Y(la)) : ctx.moveTo(X(lo),Y(la))); ctx.stroke(); });
-    ctx.globalAlpha = 0.92; ctx.strokeStyle = "#fde68a"; ctx.lineWidth = 2.2 * sc;
-    (osm.road_major || []).forEach(line => { ctx.beginPath(); line.forEach(([lo,la],i) => i ? ctx.lineTo(X(lo),Y(la)) : ctx.moveTo(X(lo),Y(la))); ctx.stroke(); });
-    ctx.globalAlpha = 1;
-    // 4 地名（抽稀避让）
-    ctx.font = `${Math.round(11 * Math.max(0.8, sc))}px "Microsoft YaHei",sans-serif`;
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    const placed = [];
-    (osm.places || []).forEach(([lo, la, name]) => {
-      const px = X(lo), py = Y(la);
-      if (placed.some(q => Math.hypot(q[0]-px, q[1]-py) < 44)) return;
-      placed.push([px, py]);
-      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(15,23,42,.75)"; ctx.strokeText(name, px, py);
-      ctx.fillStyle = "#fff"; ctx.fillText(name, px, py);
-    });
-    // 5 排放口与节点
-    ctx.fillStyle = "#10b981"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
-    viz.outfalls.forEach(([x,y]) => { const px = X(x), py = Y(y), a = 6 * sc, b = 5 * sc;
-      ctx.beginPath(); ctx.moveTo(px,py-a); ctx.lineTo(px+a,py+b); ctx.lineTo(px-a,py+b); ctx.closePath(); ctx.fill(); ctx.stroke(); });
-    wet.forEach(nd => {
-      ctx.beginPath(); ctx.arc(X(nd.x), Y(nd.y), 2.2 * sc, 0, 7);
-      ctx.fillStyle = "rgba(30,58,138,.85)"; ctx.fill();
-      ctx.strokeStyle = "#fff"; ctx.lineWidth = 0.8; ctx.stroke();
-    });
-    // 6 指北针（右上）
-    const nx0 = W - 26 * (sc < 0.8 ? 0.8 : 1), ny0 = 26;
-    ctx.fillStyle = "rgba(255,255,255,.75)"; ctx.beginPath(); ctx.arc(nx0, ny0, 15, 0, 7); ctx.fill();
-    ctx.strokeStyle = "#334155"; ctx.lineWidth = 1.6;
-    ctx.beginPath(); ctx.moveTo(nx0, ny0 + 8); ctx.lineTo(nx0, ny0 - 7); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(nx0, ny0 - 9); ctx.lineTo(nx0 - 4, ny0 - 3); ctx.lineTo(nx0 + 4, ny0 - 3); ctx.closePath();
-    ctx.fillStyle = "#dc2626"; ctx.fill();
-    ctx.fillStyle = "#334155"; ctx.font = "bold 9px sans-serif"; ctx.fillText("N", nx0, ny0 + 13);
-    // 7 比例尺（左下）：取整百米
-    const kmPerPx = (e - w) * 111.32 * Math.cos((n + s) / 2 * Math.PI / 180) / W;
-    let barKm = [0.5, 1, 2, 3, 5].find(k => k / kmPerPx < W * 0.28) || 5;
-    const barPx = barKm / kmPerPx, bx0 = 12, by0 = H - 14;
-    ctx.fillStyle = "rgba(255,255,255,.8)"; ctx.fillRect(bx0 - 6, by0 - 14, barPx + 34, 22);
-    ctx.fillStyle = "#334155"; ctx.fillRect(bx0, by0 - 6, barPx / 2, 4);
-    ctx.fillStyle = "#fff"; ctx.fillRect(bx0 + barPx / 2, by0 - 6, barPx / 2, 4);
-    ctx.strokeStyle = "#334155"; ctx.lineWidth = 0.8; ctx.strokeRect(bx0, by0 - 6, barPx, 4);
-    ctx.fillStyle = "#334155"; ctx.font = "10px sans-serif"; ctx.textAlign = "left";
-    ctx.fillText(barKm < 1 ? `${barKm * 1000} m` : `${barKm} km`, bx0 + barPx + 5, by0 - 3);
   };
-  draw();
+  drawFlood();
+
+  // top：道路/地名/排放口/节点（保证在积水之上清晰）
+  ctx = topCv.getContext("2d");
+  ctx.globalAlpha = 0.5; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1;
+  (osm.roads || []).forEach(line => { ctx.beginPath(); line.forEach(([lo,la],i) => i ? ctx.lineTo(X(lo),Y(la)) : ctx.moveTo(X(lo),Y(la))); ctx.stroke(); });
+  ctx.globalAlpha = 0.95; ctx.strokeStyle = "#fde68a"; ctx.lineWidth = 3;
+  (osm.road_major || []).forEach(line => { ctx.beginPath(); line.forEach(([lo,la],i) => i ? ctx.lineTo(X(lo),Y(la)) : ctx.moveTo(X(lo),Y(la))); ctx.stroke(); });
+  ctx.globalAlpha = 1;
+  ctx.font = `13px "Microsoft YaHei",sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const placed = [];
+  (osm.places || []).forEach(([lo, la, name]) => {
+    const px = X(lo), py = Y(la);
+    if (placed.some(q => Math.hypot(q[0]-px, q[1]-py) < 44)) return;
+    placed.push([px, py]);
+    ctx.lineWidth = 3; ctx.strokeStyle = "rgba(15,23,42,.75)"; ctx.strokeText(name, px, py);
+    ctx.fillStyle = "#fff"; ctx.fillText(name, px, py);
+  });
+  ctx.fillStyle = "#10b981"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.2;
+  viz.outfalls.forEach(([x,y]) => { const px = X(x), py = Y(y);
+    ctx.beginPath(); ctx.moveTo(px,py-7); ctx.lineTo(px+7,py+6); ctx.lineTo(px-7,py+6); ctx.closePath(); ctx.fill(); ctx.stroke(); });
+  wet.forEach(nd => {
+    ctx.beginPath(); ctx.arc(X(nd.x), Y(nd.y), 2.6, 0, 7);
+    ctx.fillStyle = "rgba(30,58,138,.9)"; ctx.fill();
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 1; ctx.stroke();
+  });
+
+  // ---- 视口合成（pan/zoom）----
+  let W = 560, H = 420, zoom = 1, panX = 0, panY = 0, zoom0 = 1, mode = "2d";
+  const vctx = cv.getContext("2d");
+  const fitView = () => { zoom0 = Math.min(W / FW, H / FH); zoom = zoom0; panX = (W - FW * zoom) / 2; panY = (H - FH * zoom) / 2; };
+  const compose = () => {
+    vctx.setTransform(1, 0, 0, 1, 0, 0);
+    vctx.fillStyle = "#e8edf3"; vctx.fillRect(0, 0, W, H);
+    vctx.setTransform(zoom, 0, 0, zoom, panX, panY);
+    vctx.imageSmoothingEnabled = zoom < 3;
+    vctx.drawImage(baseCv, 0, 0); vctx.drawImage(floodCv, 0, 0); vctx.drawImage(topCv, 0, 0);
+    vctx.setTransform(1, 0, 0, 1, 0, 0);
+    // 视口层：指北针与比例尺（比例尺随缩放）
+    const nx0 = W - 24, ny0 = 24;
+    vctx.fillStyle = "rgba(255,255,255,.75)"; vctx.beginPath(); vctx.arc(nx0, ny0, 14, 0, 7); vctx.fill();
+    vctx.strokeStyle = "#334155"; vctx.lineWidth = 1.6;
+    vctx.beginPath(); vctx.moveTo(nx0, ny0 + 7); vctx.lineTo(nx0, ny0 - 6); vctx.stroke();
+    vctx.beginPath(); vctx.moveTo(nx0, ny0 - 8); vctx.lineTo(nx0 - 4, ny0 - 2); vctx.lineTo(nx0 + 4, ny0 - 2); vctx.closePath();
+    vctx.fillStyle = "#dc2626"; vctx.fill();
+    vctx.fillStyle = "#334155"; vctx.font = "bold 9px sans-serif"; vctx.textAlign = "center"; vctx.fillText("N", nx0, ny0 + 13);
+    const kmPerPx = (e - w) * 111.32 * Math.cos((n + s) / 2 * Math.PI / 180) / FW / zoom;
+    const barKm = [0.5, 1, 2, 3, 5, 10].find(k => k / kmPerPx < W * 0.26) || 10;
+    const barPx = barKm / kmPerPx, bx0 = 12, by0 = H - 13;
+    vctx.fillStyle = "rgba(255,255,255,.82)"; vctx.fillRect(bx0 - 6, by0 - 14, barPx + 36, 21);
+    vctx.fillStyle = "#334155"; vctx.fillRect(bx0, by0 - 6, barPx / 2, 4);
+    vctx.fillStyle = "#fff"; vctx.fillRect(bx0 + barPx / 2, by0 - 6, barPx / 2, 4);
+    vctx.strokeStyle = "#334155"; vctx.lineWidth = 0.8; vctx.strokeRect(bx0, by0 - 6, barPx, 4);
+    vctx.fillStyle = "#334155"; vctx.font = "10px sans-serif"; vctx.textAlign = "left";
+    vctx.fillText(barKm < 1 ? `${barKm * 1000} m` : `${barKm} km`, bx0 + barPx + 5, by0 - 3);
+  };
+  const layout = () => {
+    W = mapWrap.clientWidth || 560;
+    H = Math.min(440, Math.round(innerHeight * 0.58), Math.round(W * ratio)) || 300;
+    cv.width = W * 2; cv.height = H * 2; cv.style.height = H + "px";
+    vctx.setTransform(2, 0, 0, 2, 0, 0);
+    fitView(); compose();
+    if (renderer) { renderer.setSize(W, H); camera.aspect = W / H; camera.updateProjectionMatrix(); }
+  };
+
+  // ---- 交互：拖拽/滚轮/双击/悬停 ----
+  let dragging = false, lx = 0, ly = 0;
+  cv.addEventListener("pointerdown", ev => { dragging = true; lx = ev.clientX; ly = ev.clientY; cv.classList.add("dragging"); cv.setPointerCapture(ev.pointerId); });
+  cv.addEventListener("pointermove", ev => {
+    if (dragging) {
+      panX += ev.clientX - lx; panY += ev.clientY - ly; lx = ev.clientX; ly = ev.clientY; compose();
+    } else {
+      const rc = cv.getBoundingClientRect();
+      const fx = ((ev.clientX - rc.left) - panX) / zoom, fy = ((ev.clientY - rc.top) - panY) / zoom;
+      let best = null, bd = 16 / zoom * 2;
+      wet.forEach(nd => { const d = Math.hypot(X(nd.x) - fx, Y(nd.y) - fy); if (d < bd) { bd = d; best = nd; } });
+      if (best) { tip.style.display = "block"; tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY - 10 + "px";
+        tip.textContent = `${best.name}｜积水 ${best.depth} mm`; } else tip.style.display = "none";
+    }
+  });
+  cv.addEventListener("pointerup", () => { dragging = false; cv.classList.remove("dragging"); });
+  cv.addEventListener("pointerleave", () => { tip.style.display = "none"; dragging = false; });
+  cv.addEventListener("wheel", ev => {
+    ev.preventDefault();
+    const rc = cv.getBoundingClientRect(), mx = ev.clientX - rc.left, my = ev.clientY - rc.top;
+    const f = ev.deltaY < 0 ? 1.18 : 1 / 1.18;
+    const nz = Math.max(zoom0 * 0.8, Math.min(zoom0 * 48, zoom * f));
+    panX = mx - (mx - panX) * (nz / zoom); panY = my - (my - panY) * (nz / zoom); zoom = nz; compose();
+  }, { passive: false });
+  cv.addEventListener("dblclick", () => { fitView(); compose(); });
+  box.querySelector("#reset").onclick = () => { fitView(); compose(); setGamma(100); };
+  const gammaInput = box.querySelector("#gamma");
+  const setGamma = v => { gamma = v / 100; drawFlood(); compose(); updateTex(); };
+  gammaInput.addEventListener("input", () => setGamma(+gammaInput.value));
+
+  // ---- 3D 模式（three.js 本地资源）----
+  let renderer = null, scene = null, camera = null, controls = null, tex = null;
+  const buildTextureCanvas = () => {
+    const c = mkLayer(), cx = c.getContext("2d");
+    cx.drawImage(baseCv, 0, 0); cx.drawImage(floodCv, 0, 0); cx.drawImage(topCv, 0, 0);
+    return c;
+  };
+  const updateTex = () => { if (tex) { tex.image = buildTextureCanvas(); tex.needsUpdate = true; } };
+  const ensure3d = () => {
+    renderer = new THREE.WebGLRenderer({ canvas: glcv, antialias: true });
+    renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xeaf1f8);
+    camera = new THREE.PerspectiveCamera(50, W / H, 0.1, 500);
+    const cols = viz.dem[0].length, rows = viz.dem.length;
+    const midLat = (n + s) / 2, spanX = (e - w) * 111.32 * Math.cos(midLat * Math.PI / 180), spanY = (n - s) * 110.9;
+    let lo = 1e9, hi = -1e9;
+    viz.dem.forEach(row => row.forEach(v => { if (v < lo) lo = v; if (v > hi) hi = v; }));
+    const exagger = Math.max(3, Math.round(spanX * 1000 / Math.max(1, hi - lo) * 0.22));  // 垂直夸张倍数
+    const zScale = spanX / Math.max(60, hi - lo) * 0.22;  // 显示高差≈水平跨度22%
+    const geo = new THREE.PlaneGeometry(spanX, spanY, cols - 1, rows - 1);
+    const pos = geo.attributes.position;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++)
+      pos.setZ(r * cols + c, (viz.dem[r][c] - lo) * zScale);
+    pos.needsUpdate = true; geo.computeVertexNormals();
+    tex = new THREE.CanvasTexture(buildTextureCanvas());
+    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide }));
+    scene.add(mesh);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.5); sun.position.set(spanX * 0.4, -spanY * 0.3, spanX); scene.add(sun);
+    camera.position.set(0, -spanY * 0.72, spanX * 0.62); camera.lookAt(0, 0, 0);
+    controls = new THREE.OrbitControls(camera, glcv);
+    controls.enableDamping = true;
+    renderer.setSize(W, H);
+    // 高度轴说明：Z 为真实高程，垂直夸张便于观察
+    const zh = document.createElement("div");
+    zh.style.cssText = "position:absolute;left:8px;bottom:8px;font-size:10.5px;color:#334155;background:rgba(255,255,255,.88);padding:2px 8px;border-radius:6px;pointer-events:none;z-index:6";
+    zh.textContent = `三维：经度×纬度×高程（垂直夸张约 ${exagger}×）· 颜色=积水深度 · 鼠标拖转/滚轮缩放`;
+    mapWrap.appendChild(zh);
+    const anim = () => { if (mode !== "3d") return; controls.update(); renderer.render(scene, camera); requestAnimationFrame(anim); };
+    anim();
+  };
+  const setMode = m => {
+    mode = m;
+    box.querySelector("#m2d").classList.toggle("on", m === "2d");
+    box.querySelector("#m3d").classList.toggle("on", m === "3d");
+    cv.style.display = m === "2d" ? "block" : "none";
+    glcv.style.display = m === "3d" ? "block" : "none";
+    const hint = mapWrap.querySelector(".map-hint");
+    if (hint) hint.style.display = m === "2d" ? "block" : "none";
+    if (m === "3d") { if (!renderer) { try { ensure3d(); } catch (err) { addMsg("3D 初始化失败：" + err.message, "hint"); setMode("2d"); return; } } else { renderer.setSize(W, H); } 
+      (function anim(){ if (mode !== "3d") return; controls.update(); renderer.render(scene, camera); requestAnimationFrame(anim); })(); }
+    else compose();
+  };
+  if (has3d) { box.querySelector("#m2d").onclick = () => setMode("2d"); box.querySelector("#m3d").onclick = () => setMode("3d"); }
+
+  layout();
   const applyLayout = () => box.classList.toggle("narrow", box.clientWidth < 620);
   applyLayout();
   let timer = null;
-  new ResizeObserver(es => {
-    clearTimeout(timer);
-    timer = setTimeout(() => { applyLayout(); draw(); }, 100);
-  }).observe(box);
+  new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(() => { applyLayout(); layout(); }, 100); }).observe(box);
   let wt = null;
-  window.addEventListener("resize", () => {
-    clearTimeout(wt); wt = setTimeout(() => { applyLayout(); draw(); }, 150);
-  });
-  cv.onmousemove = ev => {
-    const rc = cv.getBoundingClientRect();
-    const mx = (ev.clientX - rc.left) / rc.width * (cv.width / 2);
-    const my = (ev.clientY - rc.top) / rc.height * (cv.height / 2);
-    let best = null, bd = 15;
-    wet.forEach(nd => { const d = Math.hypot(X(nd.x) - mx, Y(nd.y) - my); if (d < bd) { bd = d; best = nd; } });
-    if (best) { tip.style.display = "block"; tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY - 10 + "px";
-      tip.textContent = `${best.name}｜积水 ${best.depth} mm`; }
-    else tip.style.display = "none";
-  };
-  cv.onmouseleave = () => tip.style.display = "none";
+  window.addEventListener("resize", () => { clearTimeout(wt); wt = setTimeout(() => { applyLayout(); layout(); }, 150); });
   const snap = () => window.scrollTo({ top: box.getBoundingClientRect().top + scrollY - 8, behavior: "smooth" });
   snap(); setTimeout(snap, 400); setTimeout(snap, 1000);
 }

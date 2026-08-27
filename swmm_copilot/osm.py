@@ -23,11 +23,21 @@ ROAD_MAJOR = {"motorway", "trunk", "primary", "secondary"}
 ROAD_MINOR = {"tertiary", "residential", "unclassified", "living_street", "service"}
 
 _QUERY = """
-[out:json][timeout:60];
+[out:json][timeout:90];
 (
   way["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential|unclassified|living_street)$"]({s},{w},{n},{e});
   way["waterway"~"^(river|stream|canal|drain)$"]({s},{w},{n},{e});
   node["place"~"^(suburb|neighbourhood|quarter|city|town)$"]({s},{w},{n},{e});
+);
+out body geom;
+"""
+
+_QUERY_CITY = """  // 全市级范围：仅主干道与水系，控制数据量
+[out:json][timeout:120];
+(
+  way["highway"~"^(motorway|trunk|primary)$"]({s},{w},{n},{e});
+  way["waterway"~"^(river|canal)$"]({s},{w},{n},{e});
+  node["place"~"^(city|suburb|town)$"]({s},{w},{n},{e});
 );
 out body geom;
 """
@@ -38,6 +48,7 @@ def fetch_osm(bbox: tuple[float, float, float, float], offline: bool = False) ->
 
     返回 {roads: [[ [lon,lat],... ]], road_major: [[...]...], waterways: [[...]],
           places: [[lon, lat, name]]}；无数据/失败返回空结构。
+    大范围（>0.15 平方度，如全市）自动改用精简查询（仅主干道/主要水系）。
     """
     west, south, east, north = bbox
     cache = CACHE_DIR / f"osm_{west:.3f}_{south:.3f}_{east:.3f}_{north:.3f}.json"
@@ -46,7 +57,8 @@ def fetch_osm(bbox: tuple[float, float, float, float], offline: bool = False) ->
     if offline:
         return {"roads": [], "road_major": [], "waterways": [], "places": []}
 
-    q = _QUERY.format(w=west, s=south, e=east, n=north)
+    city_mode = (east - west) * (north - south) > 0.15
+    q = (_QUERY_CITY if city_mode else _QUERY).format(w=west, s=south, e=east, n=north)
     data = None
     for base in _OVERPASS_URLS:
         try:

@@ -2,6 +2,12 @@
 # 扩展方式：按同样格式追加条目；city/zone 必须能在 data/rainfall/*.yaml 中找到
 # slug 用于输出目录（SWMM 引擎在 Windows 下要求 ASCII 路径）
 aois:
+  深圳全市:
+    slug: shenzhen-city
+    bbox: [113.71, 22.42, 114.41, 22.87]
+    city: 深圳市
+    zone: 中部流域和水系
+    grid: 14
   深圳福田:
     slug: shenzhen-futian
     bbox: [114.03, 22.52, 114.09, 22.57]

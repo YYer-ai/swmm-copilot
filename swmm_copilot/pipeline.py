@@ -55,9 +55,10 @@ def _flood_grid(nodes_xy_d: list, shape: tuple, bbox: tuple, lam_deg: float = 0.
     return [[round(float(v), 1) for v in row] for row in g]
 
 
-def _downsample(a: np.ndarray, step: int) -> list:
-    """DEM 块平均降采样为二维列表（供前端可视化，控制体积）。"""
+def _downsample(a: np.ndarray, max_cells: int = 200) -> list:
+    """DEM 块平均降采样为二维列表（供前端可视化；全市级自动降格控体积）。"""
     h, w = a.shape
+    step = max(1, round(max(h, w) / max_cells))
     rs = [(g[0], g[-1] + 1) for g in np.array_split(np.arange(h), max(1, h // step))]
     cs = [(g[0], g[-1] + 1) for g in np.array_split(np.arange(w), max(1, w // step))]
     return [[round(float(a[r0:r1, c0:c1].mean()), 1) for c0, c1 in cs] for r0, r1 in rs]
@@ -66,6 +67,7 @@ def _downsample(a: np.ndarray, step: int) -> list:
 def assess(aoi_name: str, p: int = 50, offline: bool = False, grid: int = 8) -> dict:
     """执行一次内涝快速评估，返回结构化摘要与可视化数据（供 CLI/Agent/Web 复用）。"""
     aoi = load_aois()[aoi_name]
+    grid = int(aoi.get("grid", grid))  # 全市级片区可用更密网格
     bbox = tuple(aoi["bbox"])
     out_dir = ROOT / "output" / aoi["slug"] / f"P{p}"  # 按重现期分离，避免相互覆盖
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -97,7 +99,7 @@ def assess(aoi_name: str, p: int = 50, offline: bool = False, grid: int = 8) -> 
     _plot(aoi_name, bbox, p, filled, info, rows, out_dir)
 
     cx, cy = info["cx"], info["cy"]
-    dem_small = _downsample(filled, 3)
+    dem_small = _downsample(filled)
     flood = _flood_grid([(float(cx[i, j]), float(cy[i, j]), d) for i, j, _, d in rows],
                         (len(dem_small), len(dem_small[0])), bbox)
     osm = fetch_osm(bbox, offline=offline)

@@ -43,7 +43,7 @@
   .chatrow input { flex:1; }
   .dotting::after { content:"…"; animation:dots 1.2s steps(4,end) infinite; }
   @keyframes dots { 0%{content:""} 25%{content:"·"} 50%{content:"··"} 75%{content:"···"} }
-  .viz { align-self:stretch; background:#fff; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .viz { align-self:stretch; background:#fff; border:1px solid var(--line); border-radius:12px; overflow:hidden; container-type:inline-size; }
   .viz-head { padding:10px 14px; font-size:13px; font-weight:600; border-bottom:1px solid var(--line); background:#fafbfc; }
   .viz-body { display:flex; }
   .map-wrap { flex:1.25; position:relative; min-width:0; border-right:1px solid var(--line); }
@@ -64,7 +64,23 @@
   .viz-foot .bar { width:90px; height:6px; border-radius:3px; }
   .viz-foot a { color:var(--blue); text-decoration:none; }
   .viz .tip { position:fixed; z-index:9; background:#111827ee; color:#fff; font-size:12px; padding:4px 8px; border-radius:6px; pointer-events:none; display:none; }
-  @media (max-width:680px){ .viz-body{flex-direction:column;} .map-wrap{border-right:none;border-bottom:1px solid var(--line);} }
+  /* 容器查询：卡片随所在宽度自适应（窄窗单栏、地图在上） */
+  @container (max-width: 620px) {
+    .viz-body { flex-direction:column; }
+    .map-wrap { border-right:none; border-bottom:1px solid var(--line); }
+    .viz-stats { min-width:0; }
+    .kpi b { font-size:17px; }
+  }
+  @container (max-width: 400px) {
+    .kpi b { font-size:15px; }
+    .kpi span { font-size:10px; }
+    .viz-foot { gap:10px; }
+    .trow .dv { width:48px; }
+  }
+  @media (max-width: 720px) {
+    header h1 { font-size:19px; }
+    .wrap { padding:14px 10px 40px; }
+  }
 </style>
 </head>
 <body>
@@ -222,38 +238,54 @@ function renderViz(res){
     </div>`;
   $("msgs").appendChild(box);
 
-  const cv = box.querySelector("canvas"), tip = box.querySelector(".tip");
-  const W = box.querySelector(".map-wrap").clientWidth || 560;
+  const cv = box.querySelector("canvas"), tip = box.querySelector(".tip"), mapWrap = box.querySelector(".map-wrap");
   const ratio = (n - s) / (e - w);
-  const H = Math.min(420, Math.round(W * ratio));
-  cv.width = W * 2; cv.height = H * 2; cv.style.height = H + "px";
-  const ctx = cv.getContext("2d"); ctx.scale(2, 2);
-  const X = lon => (lon - w) / (e - w) * W, Y = lat => (n - lat) / (n - s) * H;
-
-  // 灰阶山体阴影底图（平滑插值）
-  const hs = hillshade(viz.dem), dh = hs.length, dw = hs[0].length, cw = W / dw, ch = H / dh;
-  for (let r = 0; r < dh; r++) for (let c = 0; c < dw; c++) {
-    const g = Math.round(40 + 200 * hs[r][c]);
-    ctx.fillStyle = `rgb(${g},${g + 2},${g + 5})`;
-    ctx.fillRect(c * cw, r * ch, cw + 1, ch + 1);
-  }
-  // 管网（灰蓝细线，弱化为底图要素）与排放口
-  ctx.strokeStyle = "rgba(71,85,105,.55)"; ctx.lineWidth = 1;
-  viz.links.forEach(([x1,y1,x2,y2]) => { ctx.beginPath(); ctx.moveTo(X(x1),Y(y1)); ctx.lineTo(X(x2),Y(y2)); ctx.stroke(); });
-  ctx.fillStyle = "#10b981"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
-  viz.outfalls.forEach(([x,y]) => { const px = X(x), py = Y(y);
-    ctx.beginPath(); ctx.moveTo(px,py-6); ctx.lineTo(px+6,py+5); ctx.lineTo(px-6,py+5); ctx.closePath(); ctx.fill(); ctx.stroke(); });
-  // 积水气泡（只画有积水的节点，红色分级 + 白描边）
   const wet = viz.nodes.filter(nd => nd.depth > 0);
-  wet.forEach(nd => {
-    const r = 3.5 + nd.depth / (viz.max_depth || 1) * 9;
-    ctx.beginPath(); ctx.arc(X(nd.x), Y(nd.y), r, 0, 7);
-    ctx.fillStyle = depthColor(nd.depth, viz.max_depth); ctx.globalAlpha = 0.88; ctx.fill();
-    ctx.globalAlpha = 1; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.2; ctx.stroke();
-  });
+  let X, Y;  // 经纬度→像素映射（draw 时更新，供悬停使用）
+
+  const draw = () => {
+    const W = mapWrap.clientWidth || 560;
+    const H = Math.min(420, Math.round(W * ratio));
+    cv.width = W * 2; cv.height = H * 2; cv.style.height = H + "px";
+    const ctx = cv.getContext("2d"); ctx.setTransform(2, 0, 0, 2, 0, 0);
+    const curW = W, curH = H;
+    X = lon => (lon - w) / (e - w) * curW; Y = lat => (n - lat) / (n - s) * curH;
+    const sc = Math.max(0.55, Math.min(1, W / 560));  // 地图要素随宽度缩放
+
+    // 灰阶山体阴影底图
+    const hs = hillshade(viz.dem), dh = hs.length, dw = hs[0].length, cw = W / dw, ch = H / dh;
+    for (let r = 0; r < dh; r++) for (let c = 0; c < dw; c++) {
+      const g = Math.round(40 + 200 * hs[r][c]);
+      ctx.fillStyle = `rgb(${g},${g + 2},${g + 5})`;
+      ctx.fillRect(c * cw, r * ch, cw + 1, ch + 1);
+    }
+    // 管网（灰蓝细线）与排放口
+    ctx.strokeStyle = "rgba(71,85,105,.55)"; ctx.lineWidth = 1;
+    viz.links.forEach(([x1,y1,x2,y2]) => { ctx.beginPath(); ctx.moveTo(X(x1),Y(y1)); ctx.lineTo(X(x2),Y(y2)); ctx.stroke(); });
+    ctx.fillStyle = "#10b981"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
+    viz.outfalls.forEach(([x,y]) => { const px = X(x), py = Y(y), a = 6 * sc, b = 5 * sc;
+      ctx.beginPath(); ctx.moveTo(px,py-a); ctx.lineTo(px+a,py+b); ctx.lineTo(px-a,py+b); ctx.closePath(); ctx.fill(); ctx.stroke(); });
+    // 积水气泡（红色分级 + 白描边）
+    wet.forEach(nd => {
+      const r = (3.5 + nd.depth / (viz.max_depth || 1) * 9) * sc;
+      ctx.beginPath(); ctx.arc(X(nd.x), Y(nd.y), r, 0, 7);
+      ctx.fillStyle = depthColor(nd.depth, viz.max_depth); ctx.globalAlpha = 0.88; ctx.fill();
+      ctx.globalAlpha = 1; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.2 * sc; ctx.stroke();
+    });
+  };
+  draw();
+  // 宽度变化时重绘（容器查询切换单/双栏、窗口缩放均触发；高度变化忽略避免循环）
+  let timer = null, lastW = mapWrap.clientWidth;
+  new ResizeObserver(es => {
+    const nw = es[0].contentRect.width;
+    if (Math.abs(nw - lastW) < 2) return;
+    lastW = nw; clearTimeout(timer); timer = setTimeout(draw, 100);
+  }).observe(mapWrap);
   // 悬停提示
   cv.onmousemove = ev => {
-    const rc = cv.getBoundingClientRect(), mx = (ev.clientX - rc.left) * (W / rc.width), my = (ev.clientY - rc.top) * (H / rc.height);
+    const rc = cv.getBoundingClientRect();
+    const mx = (ev.clientX - rc.left) / rc.width * (cv.width / 2);
+    const my = (ev.clientY - rc.top) / rc.height * (cv.height / 2);
     let best = null, bd = 15;
     wet.forEach(nd => { const d = Math.hypot(X(nd.x) - mx, Y(nd.y) - my); if (d < bd) { bd = d; best = nd; } });
     if (best) { tip.style.display = "block"; tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY - 10 + "px";

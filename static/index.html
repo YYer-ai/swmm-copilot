@@ -245,7 +245,9 @@ function renderViz(res){
       <span><span class="sw" style="background:#10b981"></span>排放口</span>
       <span><span class="sw" style="background:rgba(30,58,138,.85)"></span>节点（悬停看深度）</span>
       <span style="flex:1"></span>
-      <a href="/api/artifact?aoi=${viz.slug}&p=${viz.p}&name=flood_map.png" target="_blank">下载原图</a>
+      <a href="/api/artifact?aoi=${viz.slug}&p=${viz.p}&name=report.md" target="_blank">评估报告(MD)</a>
+      <a href="/api/artifact?aoi=${viz.slug}&p=${viz.p}&name=report.docx" target="_blank">报告(Word)</a>
+      <a href="/api/artifact?aoi=${viz.slug}&p=${viz.p}&name=flood_map.png" target="_blank">风险图</a>
       <a href="/api/artifact?aoi=${viz.slug}&p=${viz.p}&name=model.inp" target="_blank">SWMM 模型</a>
     </div>`;
   $("msgs").appendChild(box);

@@ -136,7 +136,7 @@ def chat(ci: ChatIn):
 @app.get("/api/artifact")
 def artifact(aoi: str, p: int, name: str = "flood_map.png"):
     """评估产物文件服务（限 output/ 下白名单文件，防路径穿越）。"""
-    if name not in ("flood_map.png", "model.inp") or "/" in aoi or ".." in aoi:
+    if name not in ("flood_map.png", "model.inp", "report.md", "report.docx") or "/" in aoi or ".." in aoi:
         return JSONResponse({"ok": False, "error": "非法请求"}, status_code=400)
     f = ROOT / "output" / aoi / f"P{p}" / name
     if not f.exists():

@@ -114,7 +114,7 @@ def assess(aoi_name: str, p: int = 50, offline: bool = False, grid: int = 8) -> 
         "max_depth": round(rows[0][3], 0) if rows else 0,
         "slug": aoi["slug"], "p": p,
     }
-    return {
+    result = {
         "aoi": aoi_name, "city": aoi["city"], "formula_zone": aoi["zone"],
         "return_period_yr": p, "rain_total_mm": round(rain_total, 1),
         "imperv_range_pct": (round(float(imp_grid.min()), 0), round(float(imp_grid.max()), 0)),
@@ -125,6 +125,16 @@ def assess(aoi_name: str, p: int = 50, offline: bool = False, grid: int = 8) -> 
         "viz": viz,
         "note": "快速评估级：管网为概化生成（隐含约3年一遇设计标准），积水深为节点溢流折算",
     }
+    from .report import generate_docx, generate_markdown
+
+    result["report_md"] = str(out_dir / "report.md")
+    (out_dir / "report.md").write_text(generate_markdown(result), encoding="utf-8")
+    try:
+        generate_docx(result, out_dir / "report.docx")
+        result["report_docx"] = str(out_dir / "report.docx")
+    except ImportError:
+        pass  # 未安装 python-docx 时仅生成 Markdown
+    return result
 
 
 def _plot(aoi_name, bbox, p, filled, info, rows, out_dir: Path) -> None:

@@ -43,7 +43,7 @@
   .chatrow input { flex:1; }
   .dotting::after { content:"…"; animation:dots 1.2s steps(4,end) infinite; }
   @keyframes dots { 0%{content:""} 25%{content:"·"} 50%{content:"··"} 75%{content:"···"} }
-  .viz { align-self:stretch; background:#fff; border:1px solid var(--line); border-radius:12px; overflow:hidden; container-type:inline-size; }
+  .viz { align-self:stretch; background:#fff; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
   .viz-head { padding:10px 14px; font-size:13px; font-weight:600; border-bottom:1px solid var(--line); background:#fafbfc; }
   .viz-body { display:flex; }
   .map-wrap { flex:1.25; position:relative; min-width:0; border-right:1px solid var(--line); }
@@ -63,20 +63,14 @@
   .viz-foot .sw { display:inline-block; width:12px; height:8px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
   .viz-foot .bar { width:90px; height:6px; border-radius:3px; }
   .viz-foot a { color:var(--blue); text-decoration:none; }
-  .viz .tip { position:fixed; z-index:9; background:#111827ee; color:#fff; font-size:12px; padding:4px 8px; border-radius:6px; pointer-events:none; display:none; }
-  /* 容器查询：卡片随所在宽度自适应（窄窗单栏、地图在上） */
-  @container (max-width: 620px) {
-    .viz-body { flex-direction:column; }
-    .map-wrap { border-right:none; border-bottom:1px solid var(--line); }
-    .viz-stats { min-width:0; }
-    .kpi b { font-size:17px; }
-  }
-  @container (max-width: 400px) {
-    .kpi b { font-size:15px; }
-    .kpi span { font-size:10px; }
-    .viz-foot { gap:10px; }
-    .trow .dv { width:48px; }
-  }
+  /* 窄卡布局由 JS 切换 .narrow（兼容不支持容器查询的浏览器） */
+  .viz.narrow .viz-body { flex-direction: column; }
+  .viz.narrow .map-wrap { border-right: none; border-bottom: 1px solid var(--line); }
+  .viz.narrow .viz-stats { min-width: 0; }
+  .viz.narrow .kpi b { font-size: 17px; }
+  .viz.narrow .trow .dv { width: 48px; }
+  .viz.narrow .viz-foot { gap: 10px; }
+  #viz-tip { position:fixed; z-index:99; background:#111827ee; color:#fff; font-size:12px; padding:4px 8px; border-radius:6px; pointer-events:none; display:none; }
   @media (max-width: 720px) {
     header h1 { font-size:19px; }
     .wrap { padding:14px 10px 40px; }
@@ -213,7 +207,7 @@ function renderViz(res){
   box.innerHTML = `
     <div class="viz-head">${res.aoi} · ${res.return_period_yr} 年一遇 · 内涝快速评估</div>
     <div class="viz-body">
-      <div class="map-wrap"><canvas></canvas><div class="tip"></div></div>
+      <div class="map-wrap"><canvas></canvas></div>
       <div class="viz-stats">
         <div class="kpis">
           <div class="kpi"><b>${res.rain_total_mm}</b><span>设计总雨量 mm</span></div>
@@ -238,10 +232,14 @@ function renderViz(res){
     </div>`;
   $("msgs").appendChild(box);
 
-  const cv = box.querySelector("canvas"), tip = box.querySelector(".tip"), mapWrap = box.querySelector(".map-wrap");
+  const cv = box.querySelector("canvas"), mapWrap = box.querySelector(".map-wrap");
   const ratio = (n - s) / (e - w);
   const wet = viz.nodes.filter(nd => nd.depth > 0);
   let X, Y;  // 经纬度→像素映射（draw 时更新，供悬停使用）
+  // 悬停提示挂 body（fixed 相对视口；若在 .viz 内会被裁剪且受包含块影响）
+  const tip = document.getElementById("viz-tip") || (() => {
+    const t = document.createElement("div"); t.id = "viz-tip"; document.body.appendChild(t); return t;
+  })();
 
   const draw = () => {
     const W = mapWrap.clientWidth || 560;
@@ -274,13 +272,15 @@ function renderViz(res){
     });
   };
   draw();
-  // 宽度变化时重绘（容器查询切换单/双栏、窗口缩放均触发；高度变化忽略避免循环）
+  // 宽度变化：切换单/双栏（JS 判断，兼容所有浏览器内核）并重绘地图
+  const applyLayout = () => box.classList.toggle("narrow", box.clientWidth < 620);
+  applyLayout();
   let timer = null, lastW = mapWrap.clientWidth;
   new ResizeObserver(es => {
-    const nw = es[0].contentRect.width;
-    if (Math.abs(nw - lastW) < 2) return;
-    lastW = nw; clearTimeout(timer); timer = setTimeout(draw, 100);
-  }).observe(mapWrap);
+    clearTimeout(timer);
+    timer = setTimeout(() => { applyLayout(); draw(); }, 100);
+    lastW = mapWrap.clientWidth;
+  }).observe(box);
   // 悬停提示
   cv.onmousemove = ev => {
     const rc = cv.getBoundingClientRect();

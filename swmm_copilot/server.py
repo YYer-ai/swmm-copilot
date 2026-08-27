@@ -13,7 +13,7 @@ import urllib.request
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from .agent import Agent
@@ -52,7 +52,9 @@ class ChatIn(BaseModel):
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC)
+    # no-store：页面永不缓存，避免发版后浏览器仍运行旧脚本
+    return Response(STATIC.read_text(encoding="utf-8"), media_type="text/html",
+                    headers={"Cache-Control": "no-store, must-revalidate"})
 
 
 @app.get("/api/config")

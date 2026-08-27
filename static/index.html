@@ -71,6 +71,7 @@
   .viz.narrow .trow .dv { width: 48px; }
   .viz.narrow .viz-foot { gap: 10px; }
   #viz-tip { position:fixed; z-index:99; background:#111827ee; color:#fff; font-size:12px; padding:4px 8px; border-radius:6px; pointer-events:none; display:none; }
+  #errbar { background:#fef2f2; color:#dc2626; padding:8px 14px; font-size:12px; border-bottom:1px solid #fecaca; display:none; white-space:pre-wrap; }
   @media (max-width: 720px) {
     header h1 { font-size:19px; }
     .wrap { padding:14px 10px 40px; }
@@ -109,6 +110,13 @@
 <script>
 const $ = id => document.getElementById(id);
 const history = [];
+// 脚本错误直接显示在页面顶部（便于定位浏览器兼容问题）
+window.addEventListener("error", e => {
+  const bar = $("errbar") || document.body.appendChild(Object.assign(document.createElement("div"), { id: "errbar" }));
+  document.body.prepend(bar);
+  bar.style.display = "block";
+  bar.textContent = "脚本错误：" + e.message + "（" + (e.filename || "").split("/").pop() + ":" + e.lineno + "）";
+});
 
 // 轻量 Markdown 渲染：标题/粗体/代码/表格/列表/换行（转义优先，防注入）
 function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }

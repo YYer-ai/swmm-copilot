@@ -26,3 +26,6 @@ Thumbs.db
 # 密钥与本地环境
 .env
 *.env
+
+# planning-with-files 过程文件
+.planning/

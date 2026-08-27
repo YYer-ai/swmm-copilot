@@ -28,7 +28,7 @@
   .status.err { display:block; background:#fef2f2; color:var(--red); border:1px solid #fecaca; }
   .chips { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
   .chip { font-size:12px; padding:4px 12px; border-radius:999px; background:#eef2ff; color:var(--blue); cursor:pointer; border:1px solid #c7d2fe; }
-  #msgs { max-height:52vh; overflow-y:auto; display:flex; flex-direction:column; gap:12px; padding:4px 2px; }
+  #msgs { display:flex; flex-direction:column; gap:12px; padding:4px 2px; }
   .msg { max-width:86%; padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.65; overflow-x:auto; }
   .msg.user { align-self:flex-end; background:var(--blue); color:#fff; white-space:pre-wrap; }
   .msg.bot { align-self:flex-start; background:#f9fafb; border:1px solid var(--line); }
@@ -209,6 +209,15 @@ function hillshade(dem){  // 光照来自西北的灰阶山体阴影
   return out;
 }
 function depthColor(d, mx){ const t = d / (mx || 1); return t < 0.33 ? "#f87171" : t < 0.7 ? "#ef4444" : "#b91c1c"; }
+function floodColor(t, alpha){  // 连续积水色带：浅蓝 → 深蓝
+  const stops = [[0,[186,230,253]],[0.4,[96,165,250]],[0.75,[37,99,235]],[1,[23,37,84]]];
+  for (let i = 1; i < stops.length; i++) if (t <= stops[i][0]) {
+    const [t0,c0] = stops[i-1], [t1,c1] = stops[i], k = (t-t0)/(t1-t0);
+    const c = c0.map((v,j)=>Math.round(v+(c1[j]-v)*k));
+    return `rgba(${c.join(",")},${alpha})`;
+  }
+  return `rgba(23,37,84,${alpha})`;
+}
 function renderViz(res){
   const viz = res.viz, [w,s,e,n] = viz.bbox;
   const box = document.createElement("div"); box.className = "viz";
@@ -230,10 +239,11 @@ function renderViz(res){
       </div>
     </div>
     <div class="viz-foot">
-      <span><span class="sw" style="background:#64748b"></span>管网</span>
+      <span><span class="sw bar" style="background:linear-gradient(90deg,#bae6fd,#60a5fa,#2563eb,#172554)"></span>积水深度 0 → ${viz.max_depth} mm（色差）</span>
+      <span><span class="sw" style="background:#fde68a"></span>主干道</span>
+      <span><span class="sw" style="background:#38bdf8"></span>水系</span>
       <span><span class="sw" style="background:#10b981"></span>排放口</span>
-      <span><span class="sw" style="background:#dc2626"></span>积水点（悬停看深度）</span>
-      <span><span class="sw bar" style="background:linear-gradient(90deg,#f87171,#b91c1c)"></span>0 → ${viz.max_depth} mm</span>
+      <span><span class="sw" style="background:rgba(30,58,138,.85)"></span>节点（悬停看深度）</span>
       <span style="flex:1"></span>
       <a href="/api/artifact?aoi=${viz.slug}&p=${viz.p}&name=flood_map.png" target="_blank">下载原图</a>
       <a href="/api/artifact?aoi=${viz.slug}&p=${viz.p}&name=model.inp" target="_blank">SWMM 模型</a>
@@ -251,7 +261,8 @@ function renderViz(res){
 
   const draw = () => {
     const W = mapWrap.clientWidth || 560;
-    const H = Math.min(420, Math.round(W * ratio));
+    // 高度随视口自适应：保证卡片在窗口内基本完整可见（不超屏）
+    const H = Math.min(420, Math.round(innerHeight * 0.55), Math.round(W * ratio));
     cv.width = W * 2; cv.height = H * 2; cv.style.height = H + "px";
     const ctx = cv.getContext("2d"); ctx.setTransform(2, 0, 0, 2, 0, 0);
     const curW = W, curH = H;
@@ -265,18 +276,42 @@ function renderViz(res){
       ctx.fillStyle = `rgb(${g},${g + 2},${g + 5})`;
       ctx.fillRect(c * cw, r * ch, cw + 1, ch + 1);
     }
-    // 管网（灰蓝细线）与排放口
-    ctx.strokeStyle = "rgba(71,85,105,.55)"; ctx.lineWidth = 1;
-    viz.links.forEach(([x1,y1,x2,y2]) => { ctx.beginPath(); ctx.moveTo(X(x1),Y(y1)); ctx.lineTo(X(x2),Y(y2)); ctx.stroke(); });
+    // 连续积水深度（色差渲染，蓝越深水越深）
+    const fl = viz.flood || [], fm = viz.max_depth || 1;
+    for (let r = 0; r < fl.length; r++) for (let c = 0; c < fl[r].length; c++) {
+      const d = fl[r][c];
+      if (d > 0) { ctx.fillStyle = floodColor(Math.min(1, d / fm), 0.78);
+        ctx.fillRect(c * cw, r * ch, cw + 1, ch + 1); }
+    }
+    // 水系（蓝线）与道路（主干黄粗、一般白细）
+    const osm = viz.osm || {};
+    ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 1.8 * sc; ctx.globalAlpha = 0.9;
+    (osm.waterways || []).forEach(line => { ctx.beginPath(); line.forEach(([lo,la],i) => i ? ctx.lineTo(X(lo),Y(la)) : ctx.moveTo(X(lo),Y(la))); ctx.stroke(); });
+    ctx.globalAlpha = 0.55; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1;
+    (osm.roads || []).forEach(line => { ctx.beginPath(); line.forEach(([lo,la],i) => i ? ctx.lineTo(X(lo),Y(la)) : ctx.moveTo(X(lo),Y(la))); ctx.stroke(); });
+    ctx.globalAlpha = 0.92; ctx.strokeStyle = "#fde68a"; ctx.lineWidth = 2.2 * sc;
+    (osm.road_major || []).forEach(line => { ctx.beginPath(); line.forEach(([lo,la],i) => i ? ctx.lineTo(X(lo),Y(la)) : ctx.moveTo(X(lo),Y(la))); ctx.stroke(); });
+    ctx.globalAlpha = 1;
+    // 地名（抽稀避让：白字深描边）
+    ctx.font = `${Math.round(11 * Math.max(0.8, sc))}px "Microsoft YaHei",sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const placed = [];
+    (osm.places || []).forEach(([lo, la, name]) => {
+      const px = X(lo), py = Y(la);
+      if (placed.some(q => Math.hypot(q[0]-px, q[1]-py) < 44)) return;
+      placed.push([px, py]);
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(15,23,42,.75)"; ctx.strokeText(name, px, py);
+      ctx.fillStyle = "#fff"; ctx.fillText(name, px, py);
+    });
+    // 排放口（绿三角白描边）
     ctx.fillStyle = "#10b981"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
     viz.outfalls.forEach(([x,y]) => { const px = X(x), py = Y(y), a = 6 * sc, b = 5 * sc;
       ctx.beginPath(); ctx.moveTo(px,py-a); ctx.lineTo(px+a,py+b); ctx.lineTo(px-a,py+b); ctx.closePath(); ctx.fill(); ctx.stroke(); });
-    // 积水气泡（红色分级 + 白描边）
+    // 积水节点（小点，供悬停查数）
     wet.forEach(nd => {
-      const r = (3.5 + nd.depth / (viz.max_depth || 1) * 9) * sc;
-      ctx.beginPath(); ctx.arc(X(nd.x), Y(nd.y), r, 0, 7);
-      ctx.fillStyle = depthColor(nd.depth, viz.max_depth); ctx.globalAlpha = 0.88; ctx.fill();
-      ctx.globalAlpha = 1; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.2 * sc; ctx.stroke();
+      ctx.beginPath(); ctx.arc(X(nd.x), Y(nd.y), 2.2 * sc, 0, 7);
+      ctx.fillStyle = "rgba(30,58,138,.85)"; ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 0.8; ctx.stroke();
     });
   };
   draw();
@@ -289,6 +324,11 @@ function renderViz(res){
     timer = setTimeout(() => { applyLayout(); draw(); }, 100);
     lastW = mapWrap.clientWidth;
   }).observe(box);
+  // 窗口高度变化也需重绘（地图高度上限随视口自适应）
+  let wt = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(wt); wt = setTimeout(() => { applyLayout(); draw(); }, 150);
+  });
   // 悬停提示
   cv.onmousemove = ev => {
     const rc = cv.getBoundingClientRect();
@@ -301,7 +341,9 @@ function renderViz(res){
     else tip.style.display = "none";
   };
   cv.onmouseleave = () => tip.style.display = "none";
-  $("msgs").scrollTop = 1e9;
+  // 滚动到卡片顶部对齐；后续布局/重绘可能偏移，延时二次校准
+  const snap = () => window.scrollTo({ top: box.getBoundingClientRect().top + scrollY - 8, behavior: "smooth" });
+  snap(); setTimeout(snap, 400); setTimeout(snap, 1000);
 }
 
 async function send(){
@@ -311,6 +353,7 @@ async function send(){
   addMsg(text, "user");
   const loading = addMsg("评估运行中（SWMM 模拟 + 模型解读，约 1-2 分钟）", "hint");
   loading.classList.add("dotting");
+  window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
   try {
     const r = await fetch("/api/chat", { method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({ message: text, history }) }).then(r=>r.json());

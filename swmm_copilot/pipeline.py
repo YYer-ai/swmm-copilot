@@ -19,6 +19,7 @@ from . import chicago_hyetograph, load_db
 from .dem import fetch_dem
 from .hydrology import d8_flowdir, fill_depressions, flow_accum
 from .landcover import fetch_landcover, impervious_grid
+from .osm import fetch_osm
 from .swmm_model import build_grid_inp, run_swmm
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,6 +30,29 @@ plt.rcParams["axes.unicode_minus"] = False
 
 def load_aois() -> dict:
     return yaml.safe_load((ROOT / "data" / "aoi.yaml").read_text(encoding="utf-8"))["aois"]
+
+
+def _flood_grid(nodes_xy_d: list, shape: tuple, bbox: tuple, lam_deg: float = 0.012) -> list:
+    """节点积水深 → 连续积水场（高斯核加权插值，供前端色差渲染）。
+
+    lam_deg 为影响尺度（度）：控制淹没范围的平滑扩散半径。
+    """
+    h, w = shape
+    west, south, east, north = bbox
+    xs = np.linspace(west, east, w)[None, :]
+    ys = np.linspace(north, south, h)[:, None]
+    g = np.zeros((h, w))
+    pts = [(x, y, d) for x, y, d in nodes_xy_d if d > 0]
+    if not pts:
+        return g.tolist()
+    nx = np.array([p[0] for p in pts])[None, :]
+    ny = np.array([p[1] for p in pts])[None, :]
+    nd = np.array([p[2] for p in pts])[None, :]
+    dist = np.hypot(xs[..., None] - nx, ys[..., None] - ny)      # (h,w,n)
+    wgt = np.exp(-dist / lam_deg)
+    g = (wgt * nd).sum(axis=2) / (wgt.sum(axis=2) + 1e-9)
+    g[g < 2.0] = 0.0                                            # 去边缘噪声
+    return [[round(float(v), 1) for v in row] for row in g]
 
 
 def _downsample(a: np.ndarray, step: int) -> list:
@@ -73,9 +97,15 @@ def assess(aoi_name: str, p: int = 50, offline: bool = False, grid: int = 8) -> 
     _plot(aoi_name, bbox, p, filled, info, rows, out_dir)
 
     cx, cy = info["cx"], info["cy"]
+    dem_small = _downsample(filled, 3)
+    flood = _flood_grid([(float(cx[i, j]), float(cy[i, j]), d) for i, j, _, d in rows],
+                        (len(dem_small), len(dem_small[0])), bbox)
+    osm = fetch_osm(bbox, offline=offline)
     viz = {
         "bbox": list(bbox),
-        "dem": _downsample(filled, 3),
+        "dem": dem_small,
+        "flood": flood,
+        "osm": osm,
         "links": [[float(cx[i, j]), float(cy[i, j]), float(cx[d]), float(cy[d])]
                   for (i, j), d in info["down"].items() if d is not None],
         "outfalls": [[float(cx[q]), float(cy[q])] for q in info["outfalls"]],

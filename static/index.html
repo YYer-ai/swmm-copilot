@@ -107,7 +107,7 @@
     <div class="logo"><svg viewBox="0 0 32 32"><path d="M16 4c4.8 5.8 8.5 10.2 8.5 14.3a8.5 8.5 0 1 1-17 0C7.5 14.2 11.2 9.8 16 4z" fill="#fff"/><circle cx="13.4" cy="18.6" r="3" fill="#3b82f6"/></svg></div>
     <div class="tt"><h1>内涝快评 <span style="font-size:12px;color:#94a3b8;font-weight:normal">swmm-copilot</span></h1>
       <div class="sub">自然语言驱动的城市内涝快速评估 · 规划级</div></div>
-    <span class="ver">v7</span>
+    <span class="ver">v20</span>
   </header>
 
   <div class="card" id="cfg-card">
@@ -223,6 +223,32 @@ $("btn-save").onclick = async () => {
 };
 
 // ===================== 可视化 =====================
+function smoothDem(dem, passes){
+  // 盒式均值平滑：GLO-30 实为 DSM（含建筑/树冠高度），城区逐格差分是伪地形噪声
+  let a = dem.map(r => r.slice());
+  for (let p = 0; p < passes; p++) {
+    const b = a.map(r => r.slice()), h = a.length, w = a[0].length;
+    for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+      let s = 0, n = 0;
+      for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+        const rr = r + dr, cc = c + dc;
+        if (rr >= 0 && rr < h && cc >= 0 && cc < w) { s += b[rr][cc]; n++; }
+      }
+      a[r][c] = s / n;
+    }
+  }
+  return a;
+}
+function rampColor(stops, t){
+  for (let i = 1; i < stops.length; i++) if (t <= stops[i][0]) {
+    const [t0,c0] = stops[i-1], [t1,c1] = stops[i], k = (t-t0)/(t1-t0);
+    return c0.map((v,j)=>Math.round(v+(c1[j]-v)*k));
+  }
+  return stops[stops.length-1][1];
+}
+function hypsoColor(t){  // 高程分层设色：平原绿 → 丘陵黄褐 → 山地深棕
+  return rampColor([[0,[214,232,200]],[0.3,[232,228,180]],[0.55,[205,174,126]],[0.8,[150,115,80]],[1,[105,80,55]]], t);
+}
 function hillshade(dem){
   const h = dem.length, w = dem[0].length, out = [];
   for (let r = 0; r < h; r++) { out.push([]);
@@ -250,6 +276,9 @@ function floodColor(t, alpha){
 function renderViz(res){
   const viz = res.viz, [w,s,e,n] = viz.bbox;
   const ratio = (n - s) / (e - w);
+  const dvals = viz.dem.flat().slice().sort((a,b)=>a-b);
+  const dlo = dvals[Math.floor(dvals.length * .02)];
+  const dhi = Math.max(dlo + 1, dvals[Math.floor(dvals.length * .98) - 1]);
   const has3d = !!window.THREE;
   const box = document.createElement("div"); box.className = "viz";
   box.innerHTML = `
@@ -259,6 +288,7 @@ function renderViz(res){
         <canvas id="cv2d"></canvas><canvas id="glcv"></canvas>
         <div class="map-tools">
           ${has3d ? `<div class="seg"><button id="m2d" class="on">2D</button><button id="m3d">3D 地形</button></div>` : ""}
+          ${viz.pop ? `<div class="seg"><button id="bt-terr" class="on">地形</button><button id="bt-pop">人口</button></div>` : ""}
           <span>对比度</span><input type="range" id="gamma" min="40" max="260" value="100">
           <button id="reset" style="border:none;background:none;color:#2563eb;font-size:11px;cursor:pointer;padding:0">复位</button>
         </div>
@@ -278,6 +308,8 @@ function renderViz(res){
       </div>
     </div>
     <div class="viz-foot">
+      <span id="lg-elev"><span class="sw" style="background:linear-gradient(90deg,#d6e8c8,#e8e4b4,#cdae7e,#a98a63,#806647)"></span>高程 ${Math.round(dlo)}~${Math.round(dhi)} m</span>
+      ${viz.pop ? `<span id="lg-pop" style="display:none"><span class="sw" style="background:linear-gradient(90deg,#fee8c8,#fdbb84,#e34a33,#b30000)"></span>人口 0 → ${viz.pop_max} 人/km²</span>` : ""}
       <span><span class="sw bar" style="background:linear-gradient(90deg,#bae6fd,#60a5fa,#2563eb,#172554)"></span>积水 0 → ${viz.max_depth} mm</span>
       <span><span class="sw" style="background:#fde68a"></span>主干道</span>
       <span><span class="sw" style="background:#38bdf8"></span>水系</span>
@@ -294,41 +326,86 @@ function renderViz(res){
   const wet = viz.nodes.filter(nd => nd.depth > 0);
   const tip = $("viz-tip") || (() => { const t = document.createElement("div"); t.id = "viz-tip"; document.body.appendChild(t); return t; })();
 
-  // ---- 全分辨率离屏图层（base 地形 / flood 积水 / top 道路地名），视口做 pan/zoom ----
+  // ---- 离屏图层：栅格层（地形/人口/积水）按网格分辨率建、放大绘制自动双线性平滑；要素层高清 ----
   const FW = 1600, FH = Math.max(300, Math.round(FW * ratio));
+  const GH = viz.dem.length, GW = viz.dem[0].length;
   const mkLayer = () => { const c = document.createElement("canvas"); c.width = FW; c.height = FH; return c; };
-  const baseCv = mkLayer(), floodCv = mkLayer(), topCv = mkLayer();
+  const mkGrid = () => { const c = document.createElement("canvas"); c.width = GW; c.height = GH; return c; };
+  // 栅格层统一走轻模糊转移：消除网格放大后的像素块痕迹
+  const blurInto = (dst, draw) => {
+    const t = mkGrid(), c = t.getContext("2d");
+    draw(c);
+    const d = dst.getContext("2d");
+    d.clearRect(0, 0, GW, GH);
+    d.filter = "blur(0.8px)";
+    d.drawImage(t, 0, 0);
+    d.filter = "none";
+  };
+  const baseCv = mkGrid(), floodCv = mkGrid(), popCv = mkGrid(), topCv = mkLayer();
+  let baseMode = "terr";
+  const baseLayer = () => baseMode === "terr" ? baseCv : popCv;
   const X = lon => (lon - w) / (e - w) * FW, Y = lat => (n - lat) / (n - s) * FH;
 
-  // base：山体阴影 + 水系
-  let ctx = baseCv.getContext("2d");
-  const hs = hillshade(viz.dem), dh = hs.length, dw = hs[0].length, cw = FW / dw, ch2 = FH / dh;
-  for (let r = 0; r < dh; r++) for (let c = 0; c < dw; c++) {
-    const g = Math.round(40 + 200 * hs[r][c]);
-    ctx.fillStyle = `rgb(${g},${g + 2},${g + 5})`;
-    ctx.fillRect(c * cw, r * ch2, cw + 1, ch2 + 1);
-  }
-  const osm = viz.osm || {};
-  ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 2; ctx.globalAlpha = 0.9;
-  (osm.waterways || []).forEach(line => { ctx.beginPath(); line.forEach(([lo,la],i) => i ? ctx.lineTo(X(lo),Y(la)) : ctx.moveTo(X(lo),Y(la))); ctx.stroke(); });
-  ctx.globalAlpha = 1;
-
-  // flood：积水色差（gamma 可调重绘）
-  const fl = viz.flood || [], fm = viz.max_depth || 1;
-  let gamma = 1.0;
-  const drawFlood = () => {
-    const c2 = floodCv.getContext("2d");
-    c2.clearRect(0, 0, FW, FH);
-    for (let r = 0; r < fl.length; r++) for (let c = 0; c < fl[r].length; c++) {
-      const d = fl[r][c];
-      if (d > 0) { c2.fillStyle = floodColor(Math.min(1, Math.pow(d / fm, 1 / gamma)), 0.80);
-        c2.fillRect(c * cw, r * ch2, cw + 1, ch2 + 1); }
+  // base：高程分层设色（分位数拉伸，海面单独着色）× 轻度平滑山体阴影
+  const hs = hillshade(smoothDem(viz.dem, 2)), dh = hs.length, dw = hs[0].length;
+  blurInto(baseCv, ctx => {
+    for (let r = 0; r < dh; r++) for (let c = 0; c < dw; c++) {
+      const z = viz.dem[r][c];
+      let rgb;
+      if (z <= 0.5) rgb = [168, 197, 214];                      // 海面/水面
+      else {
+        const t = Math.max(0, Math.min(1, (z - dlo) / (dhi - dlo)));
+        const shade = 0.86 + 0.24 * (hs[r][c] - 0.45) / 0.52;    // 阴影只做轻调制
+        rgb = hypsoColor(t).map(v => Math.min(255, Math.round(v * shade)));
+      }
+      ctx.fillStyle = `rgb(${rgb.join(",")})`;
+      ctx.fillRect(c, r, 1, 1);
     }
+  });
+  const osm = viz.osm || {};
+
+  // pop：人口密度底图（对比模式；YlOrRd 色带，<10 人/km² 山海留白；按人口网格自建画布，~1km 分辨率）
+  if (viz.pop) {
+    const pl = viz.pop, ph = pl.length, pw = pl[0].length, pm = viz.pop_max || 1;
+    popCv.width = pw; popCv.height = ph;
+    const tmp = document.createElement("canvas"); tmp.width = pw; tmp.height = ph;
+    const tc = tmp.getContext("2d");
+    for (let r = 0; r < ph; r++) for (let c = 0; c < pw; c++) {
+      const v = pl[r][c];
+      if (v > 10) {
+        const t = Math.min(1, Math.pow(v / pm, 0.65));
+        const rgb = rampColor([[0,[254,232,200]],[0.35,[253,187,132]],[0.7,[227,74,51]],[1,[179,0,0]]], t);
+        tc.fillStyle = `rgba(${rgb.join(",")},0.9)`;
+        tc.fillRect(c, r, 1, 1);
+      }
+    }
+    const pc = popCv.getContext("2d");
+    pc.clearRect(0, 0, pw, ph);
+    pc.filter = "blur(0.8px)"; pc.drawImage(tmp, 0, 0); pc.filter = "none";
+  }
+
+  // flood：积水色差（gamma 可调重绘；浅积水低透明度透出底图；人口模式下再降，让密度色主控）
+  const fl = viz.flood || [], fm = viz.max_depth || 1;
+  let gamma = 1.0, floodAlphaScale = 1;
+  const drawFlood = () => {
+    blurInto(floodCv, c2 => {
+      for (let r = 0; r < fl.length; r++) for (let c = 0; c < fl[r].length; c++) {
+        const d = fl[r][c];
+        if (d > 0) {
+          const t = Math.min(1, Math.pow(d / fm, 1 / gamma));
+          const a = (t < 0.18 ? 0.5 : t < 0.5 ? 0.68 : 0.85) * floodAlphaScale;
+          c2.fillStyle = floodColor(t, a);
+          c2.fillRect(c, r, 1, 1);
+        }
+      }
+    });
   };
   drawFlood();
 
-  // top：道路/地名/排放口/节点（保证在积水之上清晰）
-  ctx = topCv.getContext("2d");
+  // top：水系/道路/地名/排放口/节点（保证在积水之上清晰）
+  let ctx = topCv.getContext("2d");
+  ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 2; ctx.globalAlpha = 0.9;
+  (osm.waterways || []).forEach(line => { ctx.beginPath(); line.forEach(([lo,la],i) => i ? ctx.lineTo(X(lo),Y(la)) : ctx.moveTo(X(lo),Y(la))); ctx.stroke(); });
   ctx.globalAlpha = 0.5; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1;
   (osm.roads || []).forEach(line => { ctx.beginPath(); line.forEach(([lo,la],i) => i ? ctx.lineTo(X(lo),Y(la)) : ctx.moveTo(X(lo),Y(la))); ctx.stroke(); });
   ctx.globalAlpha = 0.95; ctx.strokeStyle = "#fde68a"; ctx.lineWidth = 3;
@@ -360,8 +437,8 @@ function renderViz(res){
     vctx.setTransform(2, 0, 0, 2, 0, 0);                 // 统一逻辑坐标（画布为 2x 物理像素）
     vctx.fillStyle = "#e8edf3"; vctx.fillRect(0, 0, W, H);  // 全幅清屏，杜绝残影
     vctx.setTransform(2 * zoom, 0, 0, 2 * zoom, 2 * panX, 2 * panY);  // 图层变换（含 DPR）
-    vctx.imageSmoothingEnabled = zoom < 3;
-    vctx.drawImage(baseCv, 0, 0); vctx.drawImage(floodCv, 0, 0); vctx.drawImage(topCv, 0, 0);
+    vctx.imageSmoothingEnabled = true;                     // 栅格层双线性平滑放大
+    vctx.drawImage(baseLayer(), 0, 0, FW, FH); vctx.drawImage(floodCv, 0, 0, FW, FH); vctx.drawImage(topCv, 0, 0);
     vctx.setTransform(2, 0, 0, 2, 0, 0);                 // 视口层：指北针与比例尺（不随缩放）
     // 指北针
     const nx0 = W - 24, ny0 = 24;
@@ -424,7 +501,8 @@ function renderViz(res){
   let renderer = null, scene = null, camera = null, controls = null, tex = null;
   const buildTextureCanvas = () => {
     const c = mkLayer(), cx = c.getContext("2d");
-    cx.drawImage(baseCv, 0, 0); cx.drawImage(floodCv, 0, 0); cx.drawImage(topCv, 0, 0);
+    cx.imageSmoothingEnabled = true;
+    cx.drawImage(baseLayer(), 0, 0, FW, FH); cx.drawImage(floodCv, 0, 0, FW, FH); cx.drawImage(topCv, 0, 0);
     return c;
   };
   const updateTex = () => { if (tex) { tex.image = buildTextureCanvas(); tex.needsUpdate = true; } };
@@ -475,6 +553,20 @@ function renderViz(res){
     else compose();
   };
   if (has3d) { box.querySelector("#m2d").onclick = () => setMode("2d"); box.querySelector("#m3d").onclick = () => setMode("3d"); }
+  if (viz.pop) {
+    const btT = box.querySelector("#bt-terr"), btP = box.querySelector("#bt-pop");
+    const setBase = m => {
+      baseMode = m;
+      floodAlphaScale = m === "pop" ? 0.55 : 1;   // 人口模式让密度色主控，积水降为叠加提示
+      drawFlood();
+      btT.classList.toggle("on", m === "terr"); btP.classList.toggle("on", m === "pop");
+      const le = box.querySelector("#lg-elev"), lp = box.querySelector("#lg-pop");
+      if (le) le.style.display = m === "terr" ? "" : "none";
+      if (lp) lp.style.display = m === "pop" ? "" : "none";
+      compose(); updateTex();
+    };
+    btT.onclick = () => setBase("terr"); btP.onclick = () => setBase("pop");
+  }
 
   layout();
   const applyLayout = () => box.classList.toggle("narrow", box.clientWidth < 620);

@@ -20,6 +20,7 @@ from .dem import fetch_dem
 from .hydrology import d8_flowdir, fill_depressions, flow_accum
 from .landcover import fetch_landcover, impervious_grid
 from .osm import fetch_osm
+from .pop import fetch_pop
 from .swmm_model import build_grid_inp, run_swmm
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -116,6 +117,14 @@ def assess(aoi_name: str, p: int = 50, offline: bool = False, grid: int = 8) -> 
         "max_depth": round(rows[0][3], 0) if rows else 0,
         "slug": aoi["slug"], "p": p,
     }
+    # 人口密度底图（可选图层：无缓存且离线时优雅降级为不显示）
+    try:
+        pop, _, _ = fetch_pop(bbox, offline=offline)
+        pop_small = _downsample(pop)
+        viz["pop"] = pop_small
+        viz["pop_max"] = round(sorted(v for row in pop_small for v in row)[max(0, int(len(pop_small) * len(pop_small[0]) * .98) - 1)], -1)
+    except Exception:
+        viz["pop"] = None
     result = {
         "aoi": aoi_name, "city": aoi["city"], "formula_zone": aoi["zone"],
         "return_period_yr": p, "rain_total_mm": round(rain_total, 1),

@@ -357,13 +357,13 @@ function renderViz(res){
   const vctx = cv.getContext("2d");
   const fitView = () => { zoom0 = Math.min(W / FW, H / FH); zoom = zoom0; panX = (W - FW * zoom) / 2; panY = (H - FH * zoom) / 2; };
   const compose = () => {
-    vctx.setTransform(1, 0, 0, 1, 0, 0);
-    vctx.fillStyle = "#e8edf3"; vctx.fillRect(0, 0, W, H);
-    vctx.setTransform(zoom, 0, 0, zoom, panX, panY);
+    vctx.setTransform(2, 0, 0, 2, 0, 0);                 // 统一逻辑坐标（画布为 2x 物理像素）
+    vctx.fillStyle = "#e8edf3"; vctx.fillRect(0, 0, W, H);  // 全幅清屏，杜绝残影
+    vctx.setTransform(2 * zoom, 0, 0, 2 * zoom, 2 * panX, 2 * panY);  // 图层变换（含 DPR）
     vctx.imageSmoothingEnabled = zoom < 3;
     vctx.drawImage(baseCv, 0, 0); vctx.drawImage(floodCv, 0, 0); vctx.drawImage(topCv, 0, 0);
-    vctx.setTransform(1, 0, 0, 1, 0, 0);
-    // 视口层：指北针与比例尺（比例尺随缩放）
+    vctx.setTransform(2, 0, 0, 2, 0, 0);                 // 视口层：指北针与比例尺（不随缩放）
+    // 指北针
     const nx0 = W - 24, ny0 = 24;
     vctx.fillStyle = "rgba(255,255,255,.75)"; vctx.beginPath(); vctx.arc(nx0, ny0, 14, 0, 7); vctx.fill();
     vctx.strokeStyle = "#334155"; vctx.lineWidth = 1.6;
@@ -392,7 +392,7 @@ function renderViz(res){
 
   // ---- 交互：拖拽/滚轮/双击/悬停 ----
   let dragging = false, lx = 0, ly = 0;
-  cv.addEventListener("pointerdown", ev => { dragging = true; lx = ev.clientX; ly = ev.clientY; cv.classList.add("dragging"); cv.setPointerCapture(ev.pointerId); });
+  cv.addEventListener("pointerdown", ev => { dragging = true; lx = ev.clientX; ly = ev.clientY; cv.classList.add("dragging"); try { cv.setPointerCapture(ev.pointerId); } catch (e) { /* 合成事件无活动指针，忽略 */ } });
   cv.addEventListener("pointermove", ev => {
     if (dragging) {
       panX += ev.clientX - lx; panY += ev.clientY - ly; lx = ev.clientX; ly = ev.clientY; compose();
